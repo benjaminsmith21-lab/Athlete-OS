@@ -4,36 +4,25 @@ Local-first mission execution PWA for athletic development.
 
 ## Quick start (phone)
 
-### The address that works
+### Use the live app (recommended)
 
-Your phone needs your PC's **local Wi‑Fi IP**, not your public internet IP.
+Open on your phone:
 
-| Wrong | Right (your PC right now) |
-|---|---|
-| `180.181.248.163` (public internet) | `192.168.87.134` (local Wi‑Fi) |
+**https://benjaminsmith21-lab.github.io/Athlete-OS/**
 
-Public IPs only work with port forwarding. For home use, both devices must be on the **same Wi‑Fi**.
+Then **Add to Home Screen** (Safari: Share → Add to Home Screen / Chrome: Install app).
 
-### Steps
+Works on any network — no PC server or same Wi‑Fi needed. Data stays on your phone (IndexedDB).
+
+### Local dev (optional)
+
+To run from your PC on the same Wi‑Fi:
 
 1. Double-click [`scripts/start-server-https.bat`](scripts/start-server-https.bat) — keep the window open.
-2. On your phone (same Wi‑Fi, not mobile data), open:
-   ```
-   https://192.168.87.134:3443
-   ```
-   Use **https** (not http). Accept the security warning once (self-signed cert).
-3. **Add to Home Screen** (Safari: Share → Add to Home Screen / Chrome: Install app)
+2. On your phone (same Wi‑Fi), open `https://<your-pc-local-ip>:3443`
+3. Accept the security warning once (self-signed cert).
 
-### "Viewing an offline copy" on phone
-
-This means the app loaded from cache but your PC server isn't reachable. Fix:
-
-1. Start `scripts/start-server-https.bat` on your PC (must stay open).
-2. Confirm PC and phone are on the same Wi‑Fi.
-3. On phone: pull to refresh, or close the tab and reopen `https://192.168.87.134:3443`.
-4. If still stuck: Chrome → site settings → Clear data for this site, then reload.
-
-The app caches for offline gym use, but needs one successful load from the server after updates.
+The app caches for offline gym use after the first load.
 
 ## What it does (v1)
 
