@@ -10,8 +10,11 @@ export const CoachService = {
     const { setLogs = [], weeklyCount = 0, integrity = {} } = context;
 
     if (mission.isFds || mission.rating === MISSION_RATINGS.MINIMUM) {
-      const name = mission.fdsExercise?.name || 'one thing';
-      return `FDS today — ${name}. Integrity preserved. Not a zero day. Return tomorrow.`;
+      const names = (mission.fdsExercises || (mission.fdsExercise ? [mission.fdsExercise] : []))
+        .map((e) => e.name)
+        .filter(Boolean);
+      const label = names.length > 1 ? names.join(', ') : names[0] || 'one thing';
+      return `FDS today — ${label}. Integrity preserved. Not a zero day. Return tomorrow.`;
     }
 
     if (mission.rating === MISSION_RATINGS.ABANDONED) {

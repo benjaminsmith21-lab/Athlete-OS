@@ -1,15 +1,18 @@
 import { OPERATIONS, FDS_FALLBACKS } from './seed/blueprint-v1.js';
-import { getActiveCampaign, getTodayBlueprint, getCampaignWeek } from './services/campaign.js';
+import { getActiveCampaign, getTodayBlueprint, getCampaignWeek, updateCampaignBodyMetrics } from './services/campaign.js';
 import {
   getOrCreateTodayMission,
   getMission,
   saveMission,
   startMission,
+  abortMission,
   logSet,
   getSetLogsForMission,
   getPreviousPerformance,
   completeMission,
   getCompletedMissionsThisWeek,
+  getMissionHistory,
+  deleteCompletedMission,
   advanceMissionPointer,
   getCurrentExercise,
   isStructuredExercise,
@@ -26,7 +29,8 @@ import {
   getIntegrity,
   updateIntegrityAfterMission,
   getWeeklyStats,
-  formatIntegritySummary
+  formatIntegritySummary,
+  adjustIntegrityAfterDelete
 } from './services/integrity.js';
 import {
   getSettings,
@@ -36,7 +40,50 @@ import {
   weightStep,
   bodyweightStart
 } from './services/settings.js';
-import { getMonthHeatmapData, renderHeatmapHtml } from './services/heatmap.js';
+import { getMonthHeatmapData, renderIntegrityHeatmapTile } from './services/heatmap.js';
+import {
+  getAllMeasurements,
+  getTodayMeasurement,
+  getLatestStoredMeasurement,
+  getMeasurementById,
+  saveDailyMeasurement,
+  deleteMeasurement,
+  checkOutlierBeforeSave,
+  getDaysSinceLastWaist,
+  validateMeasurementInput
+} from './services/bodyMeasurement.js';
+import {
+  getLatestMeasurement,
+  getMeasurementForDate,
+  getCurrentSevenDayAverage,
+  getThirtyDayChange,
+  getCampaignWeightChange,
+  getWeighInConsistency,
+  formatWeightChange
+} from './services/bodyTrend.js';
+import { getBodyCoachInsights, getHighConfidenceInsight, updateCampaignBaselineIfReady } from './services/bodyCoach.js';
+import { renderWeightChartSvg, getChartDateRange } from './services/bodyChart.js';
+import {
+  exportFullBackup,
+  downloadJson,
+  exportBodyMeasurementsCsv,
+  downloadCsv,
+  parseBodyCsv,
+  detectImportConflicts,
+  applyBackup,
+  applyBodyMeasurementsImport
+} from './services/backup.js';
+import {
+  importGarminSnapshot,
+  getGarminSyncState,
+  getLatestDailyHealth,
+  getGarminActivities,
+  formatDurationSeconds,
+  formatDistanceMeters,
+  formatActivityType,
+  formatGarminSyncTime
+} from './services/garminImport.js';
+import { getLocalDateString, formatDisplayDate } from './utils/datetime.js';
 
 const state = {
   screen: 'centre',
@@ -46,17 +93,46 @@ const state = {
   setLogs: [],
   settings: null,
   selectedRating: null,
-  checklistDone: new Set()
+  checklistDone: new Set(),
+  exerciseStarted: false,
+  exerciseStartedAt: null,
+  exerciseNoteDraft: '',
+  fdsSelection: [],
+  workoutHistory: [],
+  bodyMeasurements: [],
+  chartRange: 'campaign',
+  bodySaveFlash: null,
+  importPreview: null,
+  pendingWeighInDate: null,
+  pendingBackup: null,
+  garminImportFlash: null
 };
 
 let restTimerInterval = null;
+let exerciseTimerInterval = null;
+let restCompleteAudio = null;
+
+const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
+const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
 
 const $ = (sel) => document.querySelector(sel);
 const screenRoot = $('#screen-root');
 const headerContext = $('#header-context');
-const fdsBar = $('#fds-bar');
 const overlay = $('#overlay');
 const overlayContent = $('#overlay-content');
+
+function renderBootError(message) {
+  if (!screenRoot) return;
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <p class="section-label">Load Error</p>
+        <p class="boot-error">${escapeHtml(message)}</p>
+        <p class="boot-error-hint">Try a hard refresh. On mobile: clear site data for this address, then reload.</p>
+      </div>
+    </div>
+  `;
+}
 
 function escapeHtml(str) {
   return String(str)
@@ -71,24 +147,123 @@ function operationStyle(op) {
   return { ...cfg, style: `background:${cfg.color}22;color:${cfg.color};border:1px solid ${cfg.color}44` };
 }
 
-function showFdsBar(visible) {
-  fdsBar.classList.toggle('hidden', !visible);
-  screenRoot.classList.toggle('no-fds', !visible);
-}
-
 function setHeader(text) {
   headerContext.textContent = text || '';
 }
 
-function clearRestTimer() {
+function clearRestTimer(stopSound = true) {
   if (restTimerInterval) {
     clearInterval(restTimerInterval);
     restTimerInterval = null;
   }
+  if (stopSound) stopRestCompleteSound();
+}
+
+function getRestCompleteAudio() {
+  if (!restCompleteAudio) {
+    restCompleteAudio = new Audio(REST_COMPLETE_SOUND_URL);
+  }
+  return restCompleteAudio;
+}
+
+function preloadRestCompleteSound() {
+  try {
+    getRestCompleteAudio().load();
+  } catch {
+    /* ignore preload failures */
+  }
+}
+
+/** Unlock audio during a user gesture so delayed rest-end playback works on mobile. */
+function unlockRestCompleteSound() {
+  if (!state.settings?.restTimerSoundEnabled) return;
+  try {
+    const audio = getRestCompleteAudio();
+    const played = audio.play();
+    if (played) {
+      played
+        .then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+        })
+        .catch(() => {});
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function playRestCompleteSound() {
+  if (!state.settings?.restTimerSoundEnabled) return;
+  try {
+    const audio = getRestCompleteAudio();
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+  } catch {
+    /* ignore playback failures */
+  }
+}
+
+function stopRestCompleteSound() {
+  if (!restCompleteAudio) return;
+  try {
+    restCompleteAudio.pause();
+    restCompleteAudio.currentTime = 0;
+  } catch {
+    /* ignore */
+  }
+}
+
+function maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed) {
+  if (restSoundPlayed.value || !state.settings?.restTimerSoundEnabled) return;
+  const triggerAt =
+    totalSeconds < REST_COMPLETE_SOUND_LEAD_SECONDS
+      ? totalSeconds
+      : REST_COMPLETE_SOUND_LEAD_SECONDS;
+  if (remaining === triggerAt) {
+    restSoundPlayed.value = true;
+    playRestCompleteSound();
+  }
+}
+
+function clearExerciseTimer() {
+  if (exerciseTimerInterval) {
+    clearInterval(exerciseTimerInterval);
+    exerciseTimerInterval = null;
+  }
+}
+
+function formatElapsed(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function getWorkoutElapsedSeconds() {
+  if (!state.mission?.startedAt) return 0;
+  return (Date.now() - new Date(state.mission.startedAt).getTime()) / 1000;
+}
+
+function getExerciseElapsedSeconds() {
+  if (!state.exerciseStartedAt) return 0;
+  return (Date.now() - state.exerciseStartedAt) / 1000;
+}
+
+function renderTimerStrip() {
+  const workout = formatElapsed(getWorkoutElapsedSeconds());
+  const exercise = state.exerciseStarted ? formatElapsed(getExerciseElapsedSeconds()) : null;
+  return `
+    <div class="timer-strip">
+      <span class="timer-item">Workout ${workout}</span>
+      ${exercise ? `<span class="timer-item">Exercise ${exercise}</span>` : ''}
+    </div>
+  `;
 }
 
 async function goHome() {
   clearRestTimer();
+  clearExerciseTimer();
   closeOverlay();
   state.mission = await getMission(state.mission.id);
   state.setLogs = await getSetLogsForMission(state.mission.id);
@@ -211,8 +386,7 @@ function showDistanceField(exercise) {
 function buildAdjustmentPanel(exercise, fields) {
   const unit = state.settings?.weightUnit || 'kg';
   const wStep = weightStep(unit);
-  const isBw = fields.weightLabel === 'bodyweight';
-  const weightLabel = isBw ? 'Bodyweight' : `Weight (${unit})`;
+  const isBw = fields.weightLabel === 'bodyweight' || (!exercise.weight && showWeightField(exercise));
 
   let html = '<div class="adjust-panel" id="adjust-panel">';
 
@@ -225,7 +399,7 @@ function buildAdjustmentPanel(exercise, fields) {
   }
 
   if (showWeightField(exercise)) {
-    html += renderDialRow(weightLabel, 'adj-weight', fields.weight, {
+    html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
       min: 0,
       max: unit === 'lbs' ? 440 : 200,
       step: wStep,
@@ -249,14 +423,163 @@ function buildAdjustmentPanel(exercise, fields) {
     });
   }
 
-  html += `
-    <div class="adjust-row adjust-row-full">
-      <label>Notes</label>
-      <textarea id="adj-notes" class="adj-notes" placeholder="Optional — shown next time you do this exercise">${escapeHtml(fields.notes)}</textarea>
-    </div>
-  </div>`;
+  html += '</div>';
 
   return html;
+}
+
+function renderNoteButton(note) {
+  if (note) {
+    const preview = note.length > 24 ? `${note.slice(0, 24)}…` : note;
+    return `<button type="button" class="exercise-note-link has-note" id="btn-exercise-note" title="${escapeHtml(note)}">${escapeHtml(preview)}</button>`;
+  }
+  return `<button type="button" class="exercise-note-link" id="btn-exercise-note">+ note</button>`;
+}
+
+function formatNextExercisePreview(exercise, prev, unit) {
+  const name = formatExerciseName(exercise.name);
+  let detail = formatPrescriptionForDisplay(exercise, unit);
+
+  if (prev?.lastActual) {
+    const a = prev.lastActual;
+    const displayUnit = a.weightUnit || unit;
+    let weight = a.weight;
+    if (weight != null && displayUnit !== unit) {
+      weight = convertWeight(weight, displayUnit, unit);
+    }
+
+    if (weight && a.reps && a.sets) {
+      detail = `${weight}${unit} × ${a.reps} × ${a.sets} sets`;
+    } else if (weight && a.reps) {
+      detail = `${weight}${unit} × ${a.reps}`;
+    } else if (a.weightLabel === 'bodyweight' && a.reps && a.sets) {
+      detail = `BW × ${a.reps} × ${a.sets} sets`;
+    } else if (a.weightLabel === 'bodyweight' && a.reps) {
+      detail = `BW × ${a.reps}`;
+    } else if (a.reps && a.sets) {
+      detail = `${a.reps} × ${a.sets} sets`;
+    } else if (prev.summary) {
+      detail = prev.summary.includes(':') ? prev.summary.split(':').slice(1).join(':').trim() : prev.summary;
+    }
+  }
+
+  const noteHtml = prev?.lastNote
+    ? `<p class="rest-next-note">${escapeHtml(prev.lastNote)}</p>`
+    : '';
+
+  return `
+    <div class="rest-next">
+      <p class="rest-next-title">Up next: <strong>${escapeHtml(name)}</strong></p>
+      <p class="rest-next-detail">${escapeHtml(detail)}</p>
+      ${noteHtml}
+    </div>
+  `;
+}
+
+function beginExerciseTimer() {
+  state.exerciseStarted = true;
+  state.exerciseStartedAt = Date.now();
+  startActiveTimerTick();
+}
+
+function openNoteOverlay() {
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Exercise Note</p>
+    <p class="overlay-sub">Saved for next time you do this exercise.</p>
+    <textarea id="note-edit" class="note-edit" placeholder="Optional">${escapeHtml(state.exerciseNoteDraft)}</textarea>
+    <button type="button" class="btn-primary" id="btn-save-note">Save</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-note">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-save-note').addEventListener('click', () => {
+    state.exerciseNoteDraft = $('#note-edit').value.trim();
+    closeOverlay();
+    refreshActiveExerciseView();
+  });
+
+  $('#btn-cancel-note').addEventListener('click', closeOverlay);
+}
+
+function bindNoteButton() {
+  $('#btn-exercise-note')?.addEventListener('click', openNoteOverlay);
+}
+
+function refreshActiveExerciseView() {
+  const row = $('.exercise-note-row');
+  if (row) {
+    row.innerHTML = renderNoteButton(state.exerciseNoteDraft);
+    bindNoteButton();
+  }
+}
+
+function startActiveTimerTick() {
+  clearExerciseTimer();
+  exerciseTimerInterval = setInterval(() => {
+    const strip = $('.timer-strip');
+    if (strip) {
+      strip.outerHTML = renderTimerStrip();
+    } else {
+      clearExerciseTimer();
+    }
+  }, 1000);
+}
+
+function bindExerciseActions(exercise) {
+  bindDials(screenRoot);
+  bindNoteButton();
+
+  $('#btn-complete-exercise')?.addEventListener('click', async () => {
+    unlockRestCompleteSound();
+    const actual = collectActualFromForm(exercise);
+    await logSet(state.mission, exercise, 1, actual);
+
+    const { done, mission } = advanceMissionPointer(state.mission);
+    state.mission = await saveMission(mission);
+
+    await afterExerciseComplete(done);
+  });
+
+  $('#btn-skip')?.addEventListener('click', async () => {
+    if (!state.mission.skippedExercises) state.mission.skippedExercises = [];
+    state.mission.skippedExercises.push(exercise.id);
+    state.mission.currentExerciseIndex += 1;
+    state.mission = await saveMission(state.mission);
+
+    const next = getCurrentExercise(state.mission);
+    if (!next) renderComplete(false);
+    else renderActive();
+  });
+}
+
+function renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx) {
+  const progress = (exIndex / totalExercises) * 100;
+  state.exerciseNoteDraft = fields.notes || '';
+
+  return `
+    <div class="progress-bar-wrap">
+      <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+      <p class="progress-label">Exercise ${exIndex + 1} of ${totalExercises}</p>
+    </div>
+
+    ${renderTimerStrip()}
+
+    <div class="exercise-card">
+      <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
+      <p class="exercise-rx">${escapeHtml(rx)}</p>
+      <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+      ${renderPreviousBlock(prev)}
+    </div>
+
+    ${buildAdjustmentPanel(exercise, fields)}
+  `;
+}
+
+function renderActiveExerciseFooter(exercise) {
+  return `
+    <button type="button" class="btn-primary" id="btn-complete-exercise">Complete Exercise</button>
+    ${exercise.type === 'optional' ? '<button type="button" class="btn-secondary" id="btn-skip">Skip</button>' : ''}
+  `;
 }
 
 function getDialValue(id) {
@@ -277,7 +600,6 @@ function collectActualFromForm(exercise) {
   const weight = getDialValue('adj-weight');
   const duration = getDialValue('adj-duration');
   const distance = getDialValue('adj-distance');
-  const notes = $('#adj-notes');
 
   if (sets != null) actual.sets = Math.round(sets);
   if (reps != null) actual.reps = Math.round(reps);
@@ -295,21 +617,21 @@ function collectActualFromForm(exercise) {
     actual.distance = distance;
     actual.distanceUnit = exercise.distanceUnit || 'km';
   }
-  if (notes?.value) actual.notes = notes.value.trim();
+  if (state.exerciseNoteDraft) actual.notes = state.exerciseNoteDraft;
+  if (state.exerciseStartedAt) {
+    actual.elapsedSeconds = Math.round(getExerciseElapsedSeconds());
+  }
 
   return actual;
 }
 
 function renderPreviousBlock(prev) {
   if (!prev) return '';
-  let html = `<p class="exercise-prev">Last time: <span>${escapeHtml(prev.summary)}</span></p>`;
-  if (prev.lastNote) {
-    html += `<p class="exercise-prev-note">Note: <span>${escapeHtml(prev.lastNote)}</span></p>`;
-  }
-  return html;
+  return `<p class="exercise-prev">Last time: <span>${escapeHtml(prev.summary)}</span></p>`;
 }
 
 async function afterExerciseComplete(done) {
+  clearExerciseTimer();
   if (done) {
     renderComplete(false);
     return;
@@ -323,13 +645,31 @@ async function afterExerciseComplete(done) {
   }
 }
 
-function renderRestTimer(totalSeconds, onDone) {
+async function renderRestTimer(totalSeconds, onDone) {
   clearRestTimer();
+  clearExerciseTimer();
   state.screen = 'rest';
-  showFdsBar(false);
   setHeader('Rest');
 
+  const settings = state.settings || (await getSettings());
+  const unit = settings.weightUnit || 'kg';
+  const exercises = state.mission.exercises.filter((e) => !state.mission.skippedExercises?.includes(e.id));
+  const nextIndex = state.mission.currentExerciseIndex;
+  const nextExercise = settings.showNextExerciseOnRest ? exercises[nextIndex] : null;
+
+  let nextPreviewHtml = '';
+  if (nextExercise) {
+    const prev = await getPreviousPerformance(nextExercise.id, state.mission.id);
+    nextPreviewHtml = formatNextExercisePreview(nextExercise, prev, unit);
+  }
+
   let remaining = totalSeconds;
+  const restSoundPlayed = { value: false };
+
+  if (settings.restTimerSoundEnabled) {
+    preloadRestCompleteSound();
+    maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed);
+  }
 
   function render() {
     const pct = ((totalSeconds - remaining) / totalSeconds) * 100;
@@ -345,6 +685,7 @@ function renderRestTimer(totalSeconds, onDone) {
           <div class="rest-progress">
             <div class="rest-progress-fill" style="width:${pct}%"></div>
           </div>
+          ${nextPreviewHtml}
         </div>
         <div class="screen-footer">
           <button type="button" class="btn-secondary" id="btn-skip-rest">Skip Rest</button>
@@ -362,46 +703,482 @@ function renderRestTimer(totalSeconds, onDone) {
   restTimerInterval = setInterval(() => {
     remaining -= 1;
     if (remaining <= 0) {
-      clearRestTimer();
+      clearRestTimer(false);
       onDone();
     } else {
+      maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed);
       render();
     }
   }, 1000);
 }
 
 async function init() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then((reg) => {
-      reg.update();
-    }).catch(() => {});
+  try {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        reg.update();
+      }).catch(() => {});
+    }
+
+    state.settings = await getSettings();
+    state.campaign = await getActiveCampaign();
+    state.blueprint = await getTodayBlueprint();
+    if (!state.blueprint) {
+      throw new Error('No workout blueprint found for today.');
+    }
+    state.mission = await getOrCreateTodayMission(state.blueprint);
+    state.setLogs = await getSetLogsForMission(state.mission.id);
+
+    if (state.mission.status === MISSION_STATUS.COMPLETE) {
+      renderComplete(true);
+    } else {
+      renderCentre();
+    }
+
+    $('#btn-home').addEventListener('click', goHome);
+    $('#btn-settings').addEventListener('click', () => renderSettings());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeOverlay();
+    });
+  } catch (err) {
+    console.error('Athlete OS init failed:', err);
+    renderBootError(err?.message || 'Unknown error');
+  }
+}
+
+async function loadBodyMeasurements() {
+  state.bodyMeasurements = await getAllMeasurements();
+  return state.bodyMeasurements;
+}
+
+function formatKg(value, provisional = false) {
+  if (value == null) return 'More data required';
+  return `${value.toFixed(1)} kg${provisional ? ' *' : ''}`;
+}
+
+async function buildBodyStatusCardHtml() {
+  const measurements = state.bodyMeasurements || [];
+  const today = getLocalDateString();
+  const todayM = getMeasurementForDate(measurements, today);
+  const latest = getLatestMeasurement(measurements);
+  const seven = getCurrentSevenDayAverage(measurements, today);
+  const thirty = getThirtyDayChange(measurements, today);
+  const insight = getHighConfidenceInsight(measurements, state.campaign, today);
+  const flash = state.bodySaveFlash ? `<p class="body-save-flash">${escapeHtml(state.bodySaveFlash)}</p>` : '';
+
+  const logLabel = todayM ? "EDIT TODAY'S WEIGH-IN" : 'LOG WEIGHT';
+  const logId = todayM ? 'btn-edit-weight' : 'btn-log-weight';
+
+  if (!measurements.length) {
+    return `
+      <div class="body-status-card">
+        <p class="section-label">Body Status</p>
+        <p class="body-status-empty">No weigh-ins recorded.</p>
+        <p class="body-status-hint">Your trend starts with today's reading.</p>
+        ${flash}
+        <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
+      </div>
+    `;
   }
 
-  state.settings = await getSettings();
-  state.campaign = await getActiveCampaign();
-  state.blueprint = await getTodayBlueprint();
-  state.mission = await getOrCreateTodayMission(state.blueprint);
-  state.setLogs = await getSetLogsForMission(state.mission.id);
-
-  if (state.mission.status === MISSION_STATUS.COMPLETE) {
-    renderComplete(true);
-  } else {
-    renderCentre();
+  if (todayM) {
+    const avgLabel = seven.provisional ? '7-day average (provisional)' : '7-day average';
+    return `
+      <div class="body-status-card body-status-card--logged">
+        <div class="body-status-header">
+          <p class="section-label">Body Status</p>
+          <button type="button" class="body-status-link" id="btn-view-body-comp">View trend</button>
+        </div>
+        <div class="body-status-grid">
+          <div class="body-status-stat">
+            <span class="body-status-label">Today</span>
+            <span class="body-status-value">${todayM.weightKg.toFixed(1)} kg</span>
+          </div>
+          <div class="body-status-stat">
+            <span class="body-status-label">${avgLabel}</span>
+            <span class="body-status-value">${formatKg(seven.average, seven.provisional)}</span>
+          </div>
+          <div class="body-status-stat">
+            <span class="body-status-label">30-day change</span>
+            <span class="body-status-value">${formatWeightChange(thirty.change)}</span>
+          </div>
+        </div>
+        ${insight ? `<p class="body-status-insight">${escapeHtml(insight.message)}</p>` : ''}
+        ${flash}
+        <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
+      </div>
+    `;
   }
 
-  $('#btn-home').addEventListener('click', goHome);
-  $('#btn-settings').addEventListener('click', () => renderSettings());
-  $('#btn-fds').addEventListener('click', openFdsOverlay);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeOverlay();
+  return `
+    <div class="body-status-card">
+      <div class="body-status-header">
+        <p class="section-label">Body Status</p>
+        <button type="button" class="body-status-link" id="btn-view-body-comp">View trend</button>
+      </div>
+      <div class="body-status-grid">
+        <div class="body-status-stat">
+          <span class="body-status-label">Last recorded</span>
+          <span class="body-status-value">${latest.weightKg.toFixed(1)} kg</span>
+        </div>
+        <div class="body-status-stat">
+          <span class="body-status-label">Today</span>
+          <span class="body-status-value body-status-not-recorded">NOT RECORDED</span>
+        </div>
+      </div>
+      ${flash}
+      <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
+    </div>
+  `;
+}
+
+function bindBodyStatusCard() {
+  $('#btn-log-weight')?.addEventListener('click', () => openWeighInOverlay());
+  $('#btn-edit-weight')?.addEventListener('click', () => openWeighInOverlay(true));
+  $('#btn-view-body-comp')?.addEventListener('click', () => renderBodyComposition());
+}
+
+async function openWeighInOverlay(isEdit = false, measurementId = null) {
+  let editing = null;
+  if (measurementId) {
+    editing = await getMeasurementById(measurementId);
+  } else if (isEdit) {
+    editing = await getTodayMeasurement();
+  }
+  const latest = await getLatestStoredMeasurement();
+  const prefill = editing?.weightKg ?? latest?.weightKg ?? '';
+  const showDetails = !!(editing?.bodyFatPercent || editing?.waistCm || editing?.note);
+  const daysSinceWaist = await getDaysSinceLastWaist();
+  const waistPrompt =
+    !measurementId && daysSinceWaist >= 7
+      ? '<p class="weigh-in-waist-prompt">Weekly waist measurement is available today.</p>'
+      : '';
+
+  state.pendingWeighInDate = editing?.date || null;
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Daily Weigh-In</p>
+    <label class="weigh-in-label" for="weigh-in-weight">Body weight in kilograms</label>
+    <div class="weigh-in-weight-row">
+      <input type="text" inputmode="decimal" id="weigh-in-weight" class="weigh-in-weight-input" value="${prefill}" aria-label="Body weight in kilograms">
+      <span class="weigh-in-unit">kg</span>
+    </div>
+    <p class="weigh-in-error hidden" id="weigh-in-error"></p>
+    ${waistPrompt}
+    <button type="button" class="btn-ghost" id="btn-toggle-details">${showDetails ? 'Hide details' : 'Add details'}</button>
+    <div class="weigh-in-details ${showDetails ? '' : 'hidden'}" id="weigh-in-details">
+      <label class="weigh-in-label" for="weigh-in-fat">Estimated body fat</label>
+      <div class="weigh-in-weight-row">
+        <input type="text" inputmode="decimal" id="weigh-in-fat" class="weigh-in-detail-input" value="${editing?.bodyFatPercent ?? ''}" placeholder="Optional" aria-label="Estimated body fat percentage">
+        <span class="weigh-in-unit">%</span>
+      </div>
+      <label class="weigh-in-label" for="weigh-in-waist">Waist</label>
+      <div class="weigh-in-weight-row">
+        <input type="text" inputmode="decimal" id="weigh-in-waist" class="weigh-in-detail-input" value="${editing?.waistCm ?? ''}" placeholder="Optional" aria-label="Waist in centimetres">
+        <span class="weigh-in-unit">cm</span>
+      </div>
+      <label class="weigh-in-label" for="weigh-in-note">Note</label>
+      <textarea id="weigh-in-note" class="note-edit" placeholder="Optional">${escapeHtml(editing?.note || '')}</textarea>
+    </div>
+    <button type="button" class="btn-primary" id="btn-save-weigh-in">${editing ? "Save Weigh-In" : 'Save Weigh-In'}</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-weigh-in">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  const weightInput = $('#weigh-in-weight');
+  weightInput.focus();
+  weightInput.select();
+
+  $('#btn-toggle-details').addEventListener('click', () => {
+    $('#weigh-in-details').classList.toggle('hidden');
+    $('#btn-toggle-details').textContent = $('#weigh-in-details').classList.contains('hidden')
+      ? 'Add details'
+      : 'Hide details';
   });
+
+  $('#btn-save-weigh-in').addEventListener('click', () => submitWeighIn());
+  $('#btn-cancel-weigh-in').addEventListener('click', closeOverlay);
+}
+
+function collectWeighInForm() {
+  return {
+    weightKg: $('#weigh-in-weight')?.value,
+    bodyFatPercent: $('#weigh-in-fat')?.value,
+    waistCm: $('#weigh-in-waist')?.value,
+    note: $('#weigh-in-note')?.value
+  };
+}
+
+async function submitWeighIn(skipChecks = {}) {
+  const form = collectWeighInForm();
+  const validation = validateMeasurementInput(form);
+  const errEl = $('#weigh-in-error');
+  if (!validation.valid) {
+    errEl.textContent = validation.errors.join(' ');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  if (!skipChecks.softRange && validation.softRangeWarning) {
+    openWeighInConfirm(validation.softRangeWarning, () => submitWeighIn({ softRange: true, outlier: skipChecks.outlier }));
+    return;
+  }
+
+  const today = getLocalDateString();
+  if (!skipChecks.outlier) {
+    const outlier = await checkOutlierBeforeSave(validation.parsed.weightKg, today);
+    if (outlier.isOutlier) {
+      openWeighInConfirm(
+        `This reading is unusually different from your recent trend.\n${outlier.recentAverage?.toFixed(1)} kg recent average\n${validation.parsed.weightKg.toFixed(1)} kg entered\n\nSave anyway?`,
+        () => submitWeighIn({ softRange: true, outlier: true })
+      );
+      return;
+    }
+  }
+
+  const result = await saveDailyMeasurement(form, {
+    date: state.pendingWeighInDate || undefined
+  });
+  if (!result.ok) {
+    errEl.textContent = result.errors.join(' ');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  await loadBodyMeasurements();
+  const baseline = await updateCampaignBaselineIfReady(state.bodyMeasurements, state.campaign);
+  if (baseline) {
+    state.campaign = await updateCampaignBodyMetrics(baseline);
+  }
+
+  closeOverlay();
+  state.pendingWeighInDate = null;
+  state.bodySaveFlash = 'Weigh-in saved';
+  setTimeout(() => {
+    state.bodySaveFlash = null;
+  }, 2500);
+
+  if (state.screen === 'body') renderBodyComposition();
+  else renderCentre();
+}
+
+function openWeighInConfirm(message, onConfirm) {
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Confirm</p>
+    <p class="overlay-sub">${escapeHtml(message).replace(/\n/g, '<br>')}</p>
+    <button type="button" class="btn-primary" id="btn-confirm-weigh-in">Save anyway</button>
+    <button type="button" class="btn-secondary" id="btn-back-weigh-in">Go back</button>
+  `;
+  $('#btn-confirm-weigh-in').addEventListener('click', () => {
+    closeOverlay();
+    onConfirm();
+  });
+  $('#btn-back-weigh-in').addEventListener('click', () => openWeighInOverlay(true));
+}
+
+async function renderBodyComposition() {
+  clearRestTimer();
+  clearExerciseTimer();
+  state.screen = 'body';
+  setHeader('Body Composition');
+
+  await loadBodyMeasurements();
+  const measurements = state.bodyMeasurements;
+  const today = getLocalDateString();
+  const seven = getCurrentSevenDayAverage(measurements, today);
+  const thirty = getThirtyDayChange(measurements, today);
+  const campaignChange = getCampaignWeightChange(measurements, state.campaign, today);
+  const latest = getLatestMeasurement(measurements);
+  const consistency = getWeighInConsistency(
+    measurements,
+    state.campaign.startDate,
+    today
+  );
+  const insights = getBodyCoachInsights(measurements, state.campaign, today);
+  const range = getChartDateRange(state.chartRange, state.campaign, today);
+  const chartSvg = renderWeightChartSvg(measurements, {
+    ...range,
+    campaignStartDate: state.campaign.startDate,
+    targetWeightKg: state.campaign.bodyMetrics?.targetWeightKg
+  });
+
+  const rangeButtons = ['campaign', '30d', '6mo', '1y', 'all']
+    .map(
+      (key) =>
+        `<button type="button" class="segment-btn ${state.chartRange === key ? 'selected' : ''}" data-range="${key}">${key === 'campaign' ? 'Campaign' : key.toUpperCase()}</button>`
+    )
+    .join('');
+
+  const historyHtml = measurements.length
+    ? [...measurements]
+        .reverse()
+        .map(
+          (m) => `
+        <div class="workout-history-item measurement-history-item">
+          <div class="workout-history-info">
+            <strong>${escapeHtml(formatDisplayDate(m.date))}</strong>
+            <span>${m.weightKg.toFixed(1)} kg${m.bodyFatPercent ? ` · ${m.bodyFatPercent}% est. fat` : ''}${m.waistCm ? ` · ${m.waistCm} cm waist` : ''}</span>
+          </div>
+          <div class="measurement-actions">
+            <button type="button" class="btn-delete-workout" data-edit-measurement="${m.id}">Edit</button>
+            <button type="button" class="btn-delete-workout" data-delete-measurement="${m.id}">Delete</button>
+          </div>
+        </div>
+      `
+        )
+        .join('')
+    : '<p class="settings-empty">No weigh-ins recorded yet.</p>';
+
+  const insightHtml = insights
+    .map(
+      (i) => `
+      <div class="coach-note body-coach-note body-coach-${i.type}">
+        <strong>${escapeHtml(i.title)}</strong><br>${escapeHtml(i.message)}
+      </div>
+    `
+    )
+    .join('');
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <p class="section-label">Trend Intelligence</p>
+        <div class="body-metric-summary">
+          <div class="body-metric-card"><span>Latest</span><strong>${latest ? `${latest.weightKg.toFixed(1)} kg` : '—'}</strong></div>
+          <div class="body-metric-card"><span>7-day avg</span><strong>${formatKg(seven.average, seven.provisional)}</strong></div>
+          <div class="body-metric-card"><span>30-day change</span><strong>${formatWeightChange(thirty.change)}</strong></div>
+          <div class="body-metric-card"><span>Campaign change</span><strong>${formatWeightChange(campaignChange.change)}</strong></div>
+          <div class="body-metric-card"><span>Weigh-in consistency</span><strong>${consistency}%</strong></div>
+        </div>
+
+        ${seven.provisional && seven.count > 0 ? `<p class="body-calibrating">Trend calibrating — ${seven.count} of 7 initial weigh-ins recorded.</p>` : ''}
+
+        <div class="chart-range-control segmented-control">${rangeButtons}</div>
+        <div class="weight-chart">${chartSvg}</div>
+
+        ${insightHtml}
+
+        <p class="section-label">Measurement History</p>
+        <div class="workout-history-list">${historyHtml}</div>
+      </div>
+      <div class="screen-footer">
+        <button type="button" class="btn-primary" id="btn-log-weight-body">Log Weight</button>
+        <button type="button" class="btn-secondary" id="btn-back-centre-body">Back to Command Centre</button>
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('.chart-range-control .segment-btn[data-range]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.chartRange = btn.dataset.range;
+      renderBodyComposition();
+    });
+  });
+
+  document.querySelectorAll('[data-delete-measurement]').forEach((btn) => {
+    btn.addEventListener('click', () => openDeleteMeasurementOverlay(btn.dataset.deleteMeasurement));
+  });
+
+  document.querySelectorAll('[data-edit-measurement]').forEach((btn) => {
+    btn.addEventListener('click', () => openWeighInOverlay(true, btn.dataset.editMeasurement));
+  });
+
+  document.querySelectorAll('.chart-point').forEach((pt) => {
+    pt.addEventListener('click', () => {
+      overlayContent.innerHTML = `
+        <p class="overlay-title">${escapeHtml(formatDisplayDate(pt.dataset.date))}</p>
+        <p class="overlay-sub">${pt.dataset.weight} kg</p>
+        <button type="button" class="btn-secondary" id="btn-close-chart-tip">Close</button>
+      `;
+      overlay.classList.remove('hidden');
+      $('#btn-close-chart-tip').addEventListener('click', closeOverlay);
+    });
+  });
+
+  $('#btn-log-weight-body').addEventListener('click', () => openWeighInOverlay());
+  $('#btn-back-centre-body').addEventListener('click', () => renderCentre());
+}
+
+async function renderGarminIntelligence() {
+  clearRestTimer();
+  clearExerciseTimer();
+  state.screen = 'garmin';
+  setHeader('Garmin Intelligence');
+
+  const latest = await getLatestDailyHealth();
+  const activities = await getGarminActivities(5);
+  const sync = await getGarminSyncState();
+
+  const dateLabel = latest ? formatDisplayDate(latest.localDate) : 'No data';
+  const steps = latest?.steps != null ? latest.steps.toLocaleString('en-AU') : '—';
+  const sleep = latest?.sleep?.totalSeconds != null ? formatDurationSeconds(latest.sleep.totalSeconds) : '—';
+  const rhr = latest?.restingHeartRateBpm != null ? `${latest.restingHeartRateBpm} bpm` : '—';
+  const hrv = latest?.hrvNightlyAverageMs != null ? `${latest.hrvNightlyAverageMs} ms` : '—';
+  const stress = latest?.averageStress != null ? String(latest.averageStress) : '—';
+
+  const activityHtml = activities.length
+    ? activities
+        .map((a) => {
+          const dist = formatDistanceMeters(a.distanceMeters);
+          const dur = a.durationSeconds ? formatDurationSeconds(a.durationSeconds) : '—';
+          const parts = [formatActivityType(a.type)];
+          if (dist) parts.push(dist);
+          if (dur !== '—') parts.push(dur);
+          return `<p class="garmin-activity-line">${escapeHtml(parts.join(' · '))}</p>`;
+        })
+        .join('')
+    : '<p class="settings-empty">No activities imported yet.</p>';
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <p class="section-label">Garmin Intelligence</p>
+        <p class="garmin-inspect-date">${escapeHtml(dateLabel)}</p>
+        <div class="body-metric-summary garmin-inspect-grid">
+          <div class="body-metric-card"><span>Steps</span><strong>${steps}</strong></div>
+          <div class="body-metric-card"><span>Sleep</span><strong>${sleep}</strong></div>
+          <div class="body-metric-card"><span>Resting HR</span><strong>${rhr}</strong></div>
+          <div class="body-metric-card"><span>HRV</span><strong>${hrv}</strong></div>
+          <div class="body-metric-card"><span>Stress</span><strong>${stress}</strong></div>
+        </div>
+
+        <p class="section-label">Recent Activity</p>
+        ${activityHtml}
+
+        <p class="garmin-sync-meta">Last import: ${escapeHtml(formatGarminSyncTime(sync.lastSuccessAt))}</p>
+      </div>
+      <div class="screen-footer">
+        <button type="button" class="btn-secondary" id="btn-garmin-back">Back to Settings</button>
+      </div>
+    </div>
+  `;
+
+  $('#btn-garmin-back').addEventListener('click', () => renderSettings());
+}
+
+function openDeleteMeasurementOverlay(id) {
+  const m = state.bodyMeasurements.find((x) => x.id === id);
+  if (!m) return;
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Delete Weigh-In?</p>
+    <p class="overlay-sub">Delete the weigh-in recorded on ${escapeHtml(formatDisplayDate(m.date))}? This will update historical trends.</p>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-delete-measurement">Delete</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-delete-measurement">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+  $('#btn-confirm-delete-measurement').addEventListener('click', async () => {
+    await deleteMeasurement(id);
+    closeOverlay();
+    await loadBodyMeasurements();
+    renderBodyComposition();
+  });
+  $('#btn-cancel-delete-measurement').addEventListener('click', closeOverlay);
 }
 
 function renderCentre() {
   state.screen = 'centre';
   const completed = state.mission.status === MISSION_STATUS.COMPLETE;
   const active = state.mission.status === MISSION_STATUS.ACTIVE;
-  showFdsBar(!completed);
   setHeader('Command Centre');
 
   const op = operationStyle(state.blueprint.operation);
@@ -413,11 +1190,13 @@ function renderCentre() {
   Promise.all([
     getIntegrity(),
     getCompletedMissionsThisWeek(),
-    getMonthHeatmapData(now.getFullYear(), now.getMonth())
+    getMonthHeatmapData(now.getFullYear(), now.getMonth()),
+    loadBodyMeasurements()
   ]).then(async ([integrity, weekly, heatmapData]) => {
     const stats = await getWeeklyStats(weekly);
     const summary = formatIntegritySummary(integrity, stats);
-    const heatmapHtml = renderHeatmapHtml(heatmapData);
+    const heatmapHtml = renderIntegrityHeatmapTile(escapeHtml(summary), heatmapData);
+    const bodyStatusHtml = await buildBodyStatusCardHtml();
 
     let primaryLabel = 'Begin Mission';
     let primaryAction = () => renderBriefing();
@@ -435,26 +1214,29 @@ function renderCentre() {
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
           <p class="campaign-meta">${escapeHtml(state.campaign.season)} · Week ${week} of ${state.campaign.durationWeeks}</p>
 
-          <div class="mission-card">
-            <span class="operation-badge" style="${op.style}">${op.label}</span>
-            <p class="mission-day">${escapeHtml(state.blueprint.dayName)}</p>
-            <p class="mission-focus">Today's Mission</p>
-            <p class="mission-stats">${exerciseCount} exercises · ${op.label} front</p>
-            ${completed ? '<p class="status-complete">✓ Mission complete today</p>' : ''}
-            ${active && !completed ? '<p class="status-complete">Mission in progress</p>' : ''}
-          </div>
+          <div class="centre-stack">
+            <div class="mission-card">
+              <span class="operation-badge" style="${op.style}">${op.label}</span>
+              <p class="mission-day">${escapeHtml(state.blueprint.dayName)}</p>
+              <p class="mission-focus">Today's Mission</p>
+              <p class="mission-stats">${exerciseCount} exercises · ${op.label} front</p>
+              ${completed ? '<p class="status-complete">✓ Mission complete today</p>' : ''}
+              ${active && !completed ? '<p class="status-complete">Mission in progress</p>' : ''}
+            </div>
 
-          <div class="integrity-bar">
-            <strong>Integrity</strong><br>${escapeHtml(summary)}
-          </div>
+            <div class="centre-actions">
+              <button type="button" class="btn-primary" id="btn-begin" ${completed ? 'disabled' : ''}>
+                ${primaryLabel}
+              </button>
+              ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
+              ${active && !completed ? '<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">Abort Mission</button>' : ''}
+              ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS — Do Something</button>' : ''}
+            </div>
 
-          ${heatmapHtml}
-        </div>
-        <div class="screen-footer">
-          <button type="button" class="btn-primary" id="btn-begin" ${completed ? 'disabled' : ''}>
-            ${primaryLabel}
-          </button>
-          ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
+            ${bodyStatusHtml}
+
+            ${heatmapHtml}
+          </div>
         </div>
       </div>
     `;
@@ -465,17 +1247,71 @@ function renderCentre() {
     if (completed) {
       $('#btn-view-complete').addEventListener('click', () => renderComplete(true));
     }
+    $('#btn-centre-fds')?.addEventListener('click', openFdsOverlay);
+    $('#btn-centre-abort')?.addEventListener('click', openAbortOverlay);
+    bindBodyStatusCard();
+  }).catch((err) => {
+    console.error('Command Centre render failed:', err);
+    renderBootError(err?.message || 'Failed to render Command Centre');
   });
 }
 
 async function renderSettings() {
   clearRestTimer();
+  clearExerciseTimer();
   state.screen = 'settings';
-  showFdsBar(false);
   setHeader('Settings');
 
   state.settings = await getSettings();
   const s = state.settings;
+  const garminSync = await getGarminSyncState();
+  const history = await getMissionHistory(20);
+  state.workoutHistory = history;
+
+  const garminStatus = garminSync.lastSuccessAt
+    ? 'Current'
+    : garminSync.lastError
+      ? 'Import failed'
+      : 'Never imported';
+  const garminFlash = state.garminImportFlash
+    ? `<p class="garmin-import-flash ${garminSync.lastError ? 'garmin-import-flash--error' : ''}">${escapeHtml(state.garminImportFlash)}</p>`
+    : '';
+
+  const garminStatusHtml = garminSync.lastSuccessAt
+    ? `
+        <p class="garmin-sync-line"><span>Last successful import</span><strong>${escapeHtml(formatGarminSyncTime(garminSync.lastSuccessAt))}</strong></p>
+        <p class="garmin-sync-line"><span>Daily records</span><strong>${garminSync.lastDailyRecordCount ?? 0}</strong></p>
+        <p class="garmin-sync-line"><span>Activities</span><strong>${garminSync.lastActivityRecordCount ?? 0}</strong></p>
+        <p class="garmin-sync-line"><span>Source</span><strong>GarminDB ${escapeHtml(garminSync.lastSourceVersion || 'unknown')}</strong></p>
+      `
+    : garminSync.lastError
+      ? `
+        <p class="garmin-sync-error">Previous Garmin data remains available.</p>
+        <p class="garmin-sync-line"><span>Error</span><strong>${escapeHtml(garminSync.lastError)}</strong></p>
+      `
+      : '<p class="settings-hint">Import a garmin-snapshot.json exported from your PC.</p>';
+
+  const garminImportLabel = garminSync.lastSuccessAt ? 'Import New Snapshot' : 'Import Garmin Snapshot';
+
+  const historyHtml = history.length
+    ? (
+        await Promise.all(
+          history.map(async (m) => {
+            const logs = await getSetLogsForMission(m.id);
+            const label = `${m.dayName || m.date} · ${ratingLabel(m.rating)}`;
+            return `
+              <div class="workout-history-item">
+                <div class="workout-history-info">
+                  <strong>${escapeHtml(label)}</strong>
+                  <span>${escapeHtml(m.date)} · ${logs.length} exercises</span>
+                </div>
+                <button type="button" class="btn-delete-workout" data-mission-id="${m.id}">Delete</button>
+              </div>
+            `;
+          })
+        )
+      ).join('')
+    : '<p class="settings-empty">No completed workouts yet.</p>';
 
   screenRoot.innerHTML = `
     <div class="screen">
@@ -493,6 +1329,48 @@ async function renderSettings() {
           <p class="settings-group-title">Rest Timer (between exercises)</p>
           ${renderDialRow('Seconds', 'setting-rest', s.restTimerSeconds, { min: 0, max: 180, step: 15 })}
           <p class="settings-hint">Default 60s. Set to 0 to disable.</p>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">Show next exercise during rest</span>
+            <button type="button" class="toggle-switch ${s.showNextExerciseOnRest ? 'on' : ''}" id="toggle-next-exercise" aria-pressed="${s.showNextExerciseOnRest}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">Play sound when rest ends</span>
+            <button type="button" class="toggle-switch ${s.restTimerSoundEnabled ? 'on' : ''}" id="toggle-rest-sound" aria-pressed="${s.restTimerSoundEnabled}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Garmin Data</p>
+          <div class="garmin-sync-card">
+            <p class="garmin-sync-label">Status</p>
+            <p class="garmin-sync-status ${garminSync.lastError ? 'garmin-sync-status--error' : ''}">${escapeHtml(garminStatus)}</p>
+            ${garminStatusHtml}
+            ${garminFlash}
+            <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-garmin">${garminImportLabel}</button>
+            <input type="file" id="import-garmin-file" accept=".json,application/json" hidden>
+            ${garminSync.lastSuccessAt ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-view-garmin">View Garmin Data</button>' : ''}
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Data & Backup</p>
+          <p class="settings-hint">Export all Athlete OS data or body measurements only.</p>
+          <button type="button" class="btn-secondary" id="btn-export-backup">Export full backup</button>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-backup">Import full backup</button>
+          <input type="file" id="import-backup-file" accept=".json,application/json" hidden>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-export-body-csv">Export body measurements CSV</button>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-body-csv">Import body measurements CSV</button>
+          <input type="file" id="import-body-csv-file" accept=".csv,text/csv" hidden>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Completed Workouts</p>
+          <p class="settings-hint">Remove logged missions. Deletes set data and calendar entry.</p>
+          <div class="workout-history-list">${historyHtml}</div>
         </div>
       </div>
       <div class="screen-footer">
@@ -503,7 +1381,7 @@ async function renderSettings() {
 
   bindDials(screenRoot);
 
-  document.querySelectorAll('.segment-btn').forEach((btn) => {
+  document.querySelectorAll('.segment-btn[data-unit]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       state.settings = await saveSettings({ weightUnit: btn.dataset.unit });
       renderSettings();
@@ -518,12 +1396,206 @@ async function renderSettings() {
     });
   });
 
+  $('#toggle-next-exercise').addEventListener('click', async () => {
+    const next = !state.settings.showNextExerciseOnRest;
+    state.settings = await saveSettings({ showNextExerciseOnRest: next });
+    renderSettings();
+  });
+
+  $('#toggle-rest-sound').addEventListener('click', async () => {
+    const next = !state.settings.restTimerSoundEnabled;
+    state.settings = await saveSettings({ restTimerSoundEnabled: next });
+    renderSettings();
+  });
+
+  document.querySelectorAll('.btn-delete-workout[data-mission-id]').forEach((btn) => {
+    btn.addEventListener('click', () => openDeleteWorkoutOverlay(btn.dataset.missionId));
+  });
+
+  $('#btn-import-garmin')?.addEventListener('click', () => $('#import-garmin-file').click());
+
+  $('#import-garmin-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const text = await file.text();
+      const result = await importGarminSnapshot(text);
+      if (!result.ok) {
+        state.garminImportFlash = result.errors.join(' ');
+      } else {
+        state.garminImportFlash = `Imported ${result.dailyCount} daily records and ${result.activityCount} activities.`;
+      }
+    } catch (err) {
+      state.garminImportFlash = err?.message || 'Import failed.';
+    }
+    setTimeout(() => {
+      state.garminImportFlash = null;
+    }, 4000);
+    renderSettings();
+  });
+
+  $('#btn-view-garmin')?.addEventListener('click', () => renderGarminIntelligence());
+
+  $('#btn-export-backup').addEventListener('click', async () => {
+    const data = await exportFullBackup();
+    downloadJson(data, `athlete-os-backup-${getLocalDateString()}.json`);
+  });
+
+  $('#btn-import-backup').addEventListener('click', () => $('#import-backup-file').click());
+
+  $('#import-backup-file').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data.schemaVersion) throw new Error('Invalid backup file');
+      const existing = await getAllMeasurements();
+      state.pendingBackup = data;
+      state.importPreview = detectImportConflicts(existing, data.bodyMeasurements || []);
+      e.target.value = '';
+      openBackupImportOverlay();
+    } catch (err) {
+      e.target.value = '';
+      overlayContent.innerHTML = `
+        <p class="overlay-title">Import Failed</p>
+        <p class="overlay-sub">${escapeHtml(err.message || 'Could not read backup file.')}</p>
+        <button type="button" class="btn-secondary" id="btn-close-import-error">Close</button>
+      `;
+      overlay.classList.remove('hidden');
+      $('#btn-close-import-error').addEventListener('click', closeOverlay);
+    }
+  });
+
+  $('#btn-export-body-csv').addEventListener('click', async () => {
+    const measurements = await getAllMeasurements();
+    downloadCsv(exportBodyMeasurementsCsv(measurements), `body-measurements-${getLocalDateString()}.csv`);
+  });
+
+  $('#btn-import-body-csv').addEventListener('click', () => $('#import-body-csv-file').click());
+
+  $('#import-body-csv-file').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const rows = parseBodyCsv(text);
+    const existing = await getAllMeasurements();
+    state.importPreview = detectImportConflicts(existing, rows);
+    e.target.value = '';
+    openImportPreviewOverlay();
+  });
+
   $('#btn-settings-back').addEventListener('click', () => renderCentre());
+}
+
+function openBackupImportOverlay() {
+  const preview = state.importPreview || [];
+  const conflictCount = preview.filter((p) => p.conflict).length;
+  const rowsHtml = preview.length
+    ? preview
+        .map(
+          (p, i) => `
+      <div class="import-preview-row">
+        <strong>${escapeHtml(p.row.date)}</strong> — ${p.row.weightKg} kg
+        ${p.conflict ? `<span class="import-conflict">Conflict (current: ${p.existing.weightKg} kg)</span>` : ''}
+        ${p.conflict ? `
+          <select id="import-action-${i}" class="import-action-select">
+            <option value="skip">Skip</option>
+            <option value="replace">Replace with imported</option>
+            <option value="keep">Keep current</option>
+          </select>
+        ` : `<span class="import-new">New</span>`}
+      </div>
+    `
+        )
+        .join('')
+    : '<p class="settings-empty">No body measurements in backup.</p>';
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Import Backup</p>
+    <p class="overlay-sub">${preview.length} body measurements found${conflictCount ? ` (${conflictCount} conflicts)` : ''}. Other data will be merged.</p>
+    <div class="import-preview-list">${rowsHtml}</div>
+    <button type="button" class="btn-primary" id="btn-apply-backup-import">Apply Import</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-backup-import">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-apply-backup-import').addEventListener('click', () => applyBackupImport());
+  $('#btn-cancel-backup-import').addEventListener('click', () => {
+    state.pendingBackup = null;
+    state.importPreview = null;
+    closeOverlay();
+  });
+}
+
+async function applyBackupImport() {
+  const preview = state.importPreview || [];
+  const resolutions = preview.map((p, i) => {
+    if (!p.conflict) return 'replace';
+    return $(`#import-action-${i}`)?.value || 'skip';
+  });
+
+  if (state.pendingBackup) {
+    await applyBackup(state.pendingBackup);
+    await applyBodyMeasurementsImport(preview, resolutions);
+  }
+
+  closeOverlay();
+  state.pendingBackup = null;
+  state.importPreview = null;
+  await loadBodyMeasurements();
+  state.campaign = await getActiveCampaign();
+  renderSettings();
+}
+
+function openImportPreviewOverlay() {
+  const preview = state.importPreview || [];
+  const rowsHtml = preview
+    .map(
+      (p, i) => `
+      <div class="import-preview-row">
+        <strong>${escapeHtml(p.row.date)}</strong> — ${p.row.weightKg} kg
+        ${p.conflict ? `<span class="import-conflict">Conflict (current: ${p.existing.weightKg} kg)</span>` : ''}
+        ${p.conflict ? `
+          <select id="import-action-${i}" class="import-action-select">
+            <option value="skip">Skip</option>
+            <option value="replace">Replace with imported</option>
+            <option value="keep">Keep current</option>
+          </select>
+        ` : `<span class="import-new">New</span>`}
+      </div>
+    `
+    )
+    .join('');
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Import Preview</p>
+    <p class="overlay-sub">${preview.length} rows found. Review conflicts before applying.</p>
+    <div class="import-preview-list">${rowsHtml}</div>
+    <button type="button" class="btn-primary" id="btn-apply-import">Apply Import</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-import">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-apply-import').addEventListener('click', () => applyImportPreview());
+  $('#btn-cancel-import').addEventListener('click', closeOverlay);
+}
+
+async function applyImportPreview() {
+  const preview = state.importPreview || [];
+  const resolutions = preview.map((p, i) => {
+    if (!p.conflict) return 'replace';
+    return $(`#import-action-${i}`)?.value || 'skip';
+  });
+  await applyBodyMeasurementsImport(preview, resolutions);
+  closeOverlay();
+  state.importPreview = null;
+  await loadBodyMeasurements();
+  renderSettings();
 }
 
 function renderBriefing() {
   state.screen = 'briefing';
-  showFdsBar(false);
   setHeader('Briefing');
 
   const op = operationStyle(state.blueprint.operation);
@@ -574,7 +1646,6 @@ function renderBriefing() {
 async function renderActive() {
   clearRestTimer();
   state.screen = 'active';
-  showFdsBar(false);
   setHeader('Active Mission');
 
   state.mission = await getMission(state.mission.id);
@@ -606,54 +1677,21 @@ async function renderActive() {
 
   const exIndex = exercises.indexOf(exercise);
   const totalExercises = exercises.length;
-  const progress = (exIndex / totalExercises) * 100;
+
+  beginExerciseTimer();
 
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body">
-        <div class="progress-bar-wrap">
-          <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
-          <p class="progress-label">Exercise ${exIndex + 1} of ${totalExercises}</p>
-        </div>
-
-        <div class="exercise-card">
-          <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-          <p class="exercise-rx">${escapeHtml(rx)}</p>
-          ${renderPreviousBlock(prev)}
-        </div>
-
-        ${buildAdjustmentPanel(exercise, fields)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx)}
       </div>
-
       <div class="screen-footer">
-        <button type="button" class="btn-primary" id="btn-complete-exercise">Complete Exercise</button>
-        ${exercise.type === 'optional' ? '<button type="button" class="btn-secondary" id="btn-skip">Skip</button>' : ''}
+        ${renderActiveExerciseFooter(exercise)}
       </div>
     </div>
   `;
 
-  bindDials(screenRoot);
-
-  $('#btn-complete-exercise').addEventListener('click', async () => {
-    const actual = collectActualFromForm(exercise);
-    await logSet(state.mission, exercise, 1, actual);
-
-    const { done, mission } = advanceMissionPointer(state.mission);
-    state.mission = await saveMission(mission);
-
-    await afterExerciseComplete(done);
-  });
-
-  $('#btn-skip')?.addEventListener('click', async () => {
-    if (!state.mission.skippedExercises) state.mission.skippedExercises = [];
-    state.mission.skippedExercises.push(exercise.id);
-    state.mission.currentExerciseIndex += 1;
-    state.mission = await saveMission(state.mission);
-
-    const next = getCurrentExercise(state.mission);
-    if (!next) renderComplete(false);
-    else renderActive();
-  });
+  bindExerciseActions(exercise);
 }
 
 function renderChecklistActive(exercises) {
@@ -708,62 +1746,32 @@ function renderChecklistActive(exercises) {
 async function renderChecklistItem(exercise, exercises) {
   const unit = state.settings?.weightUnit || 'kg';
   const rx = formatPrescriptionForDisplay(exercise, unit);
-  const isOptional = exercise.type === 'optional';
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
 
   const exIndex = exercises.indexOf(exercise);
   const totalExercises = exercises.length;
-  const progress = (exIndex / totalExercises) * 100;
+
+  beginExerciseTimer();
 
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body">
-        <div class="progress-bar-wrap">
-          <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
-          <p class="progress-label">Exercise ${exIndex + 1} of ${totalExercises}</p>
-        </div>
-
-        <div class="exercise-card">
-          <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-          <p class="exercise-rx">${escapeHtml(rx)}</p>
-          ${renderPreviousBlock(prev)}
-        </div>
-
-        ${buildAdjustmentPanel(exercise, fields)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx)}
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-primary" id="btn-done-segment">Complete Exercise</button>
-        ${isOptional ? '<button type="button" class="btn-secondary" id="btn-skip-segment">Skip</button>' : ''}
+        ${renderActiveExerciseFooter(exercise)}
       </div>
     </div>
   `;
 
-  bindDials(screenRoot);
-
-  $('#btn-done-segment').addEventListener('click', async () => {
-    const actual = collectActualFromForm(exercise);
-    await logSet(state.mission, exercise, 1, actual);
-    const { done, mission } = advanceMissionPointer(state.mission);
-    state.mission = await saveMission(mission);
-    await afterExerciseComplete(done);
-  });
-
-  $('#btn-skip-segment')?.addEventListener('click', async () => {
-    if (!state.mission.skippedExercises) state.mission.skippedExercises = [];
-    state.mission.skippedExercises.push(exercise.id);
-    state.mission.currentExerciseIndex += 1;
-    state.mission = await saveMission(state.mission);
-    const next = getCurrentExercise(state.mission);
-    if (!next) renderComplete(false);
-    else renderActive();
-  });
+  bindExerciseActions(exercise);
 }
 
 async function renderComplete(alreadyDone = false) {
   clearRestTimer();
+  clearExerciseTimer();
   state.screen = 'complete';
-  showFdsBar(false);
   setHeader('Debrief');
 
   state.setLogs = await getSetLogsForMission(state.mission.id);
@@ -776,7 +1784,7 @@ async function renderComplete(alreadyDone = false) {
         <div class="screen-scroll">
           <div class="complete-banner">
             <p class="complete-title">Mission Complete</p>
-            <p class="complete-sub">${state.setLogs.length} exercises logged</p>
+            <p class="complete-sub">${state.setLogs.length} exercises logged${formatWorkoutDuration()}</p>
           </div>
 
           <p class="section-label">Rate This Mission</p>
@@ -818,7 +1826,7 @@ async function renderComplete(alreadyDone = false) {
         <div class="screen-scroll">
           <div class="complete-banner">
             <p class="complete-title">${ratingLabel(state.mission.rating)}</p>
-            <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}</p>
+            <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}${formatWorkoutDuration()}</p>
           </div>
           <div class="coach-note">${escapeHtml(note)}</div>
           <div class="integrity-bar">
@@ -835,6 +1843,13 @@ async function renderComplete(alreadyDone = false) {
 
     $('#btn-return-centre').addEventListener('click', () => goHome());
   }
+}
+
+function formatWorkoutDuration() {
+  if (!state.mission?.startedAt) return '';
+  const end = state.mission.completedAt ? new Date(state.mission.completedAt) : new Date();
+  const seconds = Math.round((end - new Date(state.mission.startedAt)) / 1000);
+  return seconds > 0 ? ` · ${formatElapsed(seconds)}` : '';
 }
 
 function ratingButton(value, label) {
@@ -879,53 +1894,152 @@ async function updateCoachPreview() {
   el.textContent = note;
 }
 
-function openFdsOverlay() {
-  const todayOptions = state.blueprint.exercises
-    .slice(0, 6)
-    .map(
-      (ex) =>
-        `<button type="button" class="fds-option" data-fds='${JSON.stringify({ id: ex.id, name: ex.name, type: ex.type })}'>${escapeHtml(formatExerciseName(ex.name))} (today)</button>`
-    )
+function fdsOptionPayload(ex) {
+  return JSON.stringify({
+    id: ex.id,
+    name: ex.name,
+    type: ex.type || 'open',
+    sets: ex.sets,
+    reps: ex.reps,
+    weight: ex.weight,
+    weightUnit: ex.weightUnit,
+    duration: ex.duration,
+    durationUnit: ex.durationUnit,
+    distance: ex.distance,
+    distanceUnit: ex.distanceUnit
+  });
+}
+
+function renderFdsOverlayContent() {
+  const todayOptions = state.blueprint.exercises.slice(0, 6);
+  const allOptions = [
+    ...todayOptions.map((ex) => ({ ...ex, label: `${formatExerciseName(ex.name)} (today)` })),
+    ...FDS_FALLBACKS.map((ex) => ({ ...ex, label: formatExerciseName(ex.name) }))
+  ];
+
+  const optionsHtml = allOptions
+    .map((ex) => {
+      const selectedIndex = state.fdsSelection.findIndex((s) => s.id === ex.id);
+      const selected = selectedIndex >= 0;
+      return `
+        <button type="button" class="fds-option ${selected ? 'selected' : ''}" data-fds='${fdsOptionPayload(ex)}'>
+          ${selected ? `<span class="fds-order">${selectedIndex + 1}</span>` : ''}
+          ${escapeHtml(ex.label)}
+        </button>
+      `;
+    })
     .join('');
 
-  const fallbackOptions = FDS_FALLBACKS.map(
-    (ex) =>
-      `<button type="button" class="fds-option" data-fds='${JSON.stringify({ id: ex.id, name: ex.name, type: ex.type })}'>${escapeHtml(formatExerciseName(ex.name))}</button>`
-  ).join('');
+  const count = state.fdsSelection.length;
 
   overlayContent.innerHTML = `
     <p class="overlay-title">FDS — Do Something</p>
-    <p class="overlay-sub">Pick one thing. Integrity preserved. Not a zero day.</p>
-    ${todayOptions}
-    ${fallbackOptions}
+    <p class="overlay-sub">Pick 1–3 exercises. Tap in the order you want to do them.</p>
+    ${optionsHtml}
+    <button type="button" class="btn-primary" id="btn-start-fds" ${count ? '' : 'disabled'}>
+      Start FDS${count ? ` (${count})` : ''}
+    </button>
     <button type="button" class="btn-secondary" id="btn-cancel-fds">Cancel</button>
   `;
 
-  overlay.classList.remove('hidden');
-
   overlayContent.querySelectorAll('.fds-option').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const fdsExercise = JSON.parse(btn.dataset.fds);
-      closeOverlay();
-
-      if (state.mission.status !== MISSION_STATUS.ACTIVE) {
-        state.mission = await startMission(state.mission);
+    btn.addEventListener('click', () => {
+      const ex = JSON.parse(btn.dataset.fds);
+      const existing = state.fdsSelection.findIndex((s) => s.id === ex.id);
+      if (existing >= 0) {
+        state.fdsSelection.splice(existing, 1);
+      } else if (state.fdsSelection.length < 3) {
+        state.fdsSelection.push(ex);
       }
-
-      const stubExercise = { id: fdsExercise.id, name: fdsExercise.name, type: fdsExercise.type || 'open' };
-      await logSet(state.mission, stubExercise, 1, { notes: 'FDS' });
-
-      state.mission = await completeMission(state.mission, MISSION_RATINGS.MINIMUM, {
-        isFds: true,
-        fdsExercise: stubExercise
-      });
-      await updateIntegrityAfterMission(state.mission);
-      state.setLogs = await getSetLogsForMission(state.mission.id);
-      renderComplete(true);
+      renderFdsOverlayContent();
     });
   });
 
+  $('#btn-start-fds')?.addEventListener('click', startFdsMission);
   $('#btn-cancel-fds').addEventListener('click', closeOverlay);
+}
+
+async function startFdsMission() {
+  if (!state.fdsSelection.length) return;
+
+  const selected = state.fdsSelection.map((ex) => structuredClone(ex));
+  closeOverlay();
+  state.fdsSelection = [];
+
+  if (state.mission.status !== MISSION_STATUS.ACTIVE) {
+    state.mission = await startMission(state.mission);
+  }
+
+  state.mission.isFds = true;
+  state.mission.fdsExercises = selected;
+  state.mission.fdsExercise = selected[0];
+  state.mission.exercises = selected;
+  state.mission.currentExerciseIndex = 0;
+  state.mission.skippedExercises = [];
+  state.mission = await saveMission(state.mission);
+  state.setLogs = [];
+  renderActive();
+}
+
+function openDeleteWorkoutOverlay(missionId) {
+  const mission = state.workoutHistory?.find((m) => m.id === missionId);
+  const label = mission ? `${mission.dayName || mission.date} · ${ratingLabel(mission.rating)}` : 'This workout';
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Delete Workout?</p>
+    <p class="overlay-sub"><strong>${escapeHtml(label)}</strong> will be removed. Set logs and calendar entry deleted.</p>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-delete-workout">Delete Workout</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-delete-workout">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-confirm-delete-workout').addEventListener('click', () => confirmDeleteWorkout(missionId));
+  $('#btn-cancel-delete-workout').addEventListener('click', closeOverlay);
+}
+
+async function confirmDeleteWorkout(missionId) {
+  closeOverlay();
+  const deleted = await deleteCompletedMission(missionId);
+  if (!deleted) return;
+
+  await adjustIntegrityAfterDelete(deleted);
+
+  if (state.mission?.id === missionId) {
+    state.mission = await getOrCreateTodayMission(state.blueprint);
+    state.setLogs = [];
+  }
+
+  renderSettings();
+}
+
+function openAbortOverlay() {
+  overlayContent.innerHTML = `
+    <p class="overlay-title">Abort Mission?</p>
+    <p class="overlay-sub">This cancels today's in-progress workout. Nothing will be logged for today.</p>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-abort">Abort Mission</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-abort">Keep Going</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-confirm-abort').addEventListener('click', confirmAbortMission);
+  $('#btn-cancel-abort').addEventListener('click', closeOverlay);
+}
+
+async function confirmAbortMission() {
+  closeOverlay();
+  clearRestTimer();
+  clearExerciseTimer();
+  state.mission = await abortMission(state.mission, state.blueprint);
+  state.setLogs = [];
+  state.checklistDone = new Set();
+  state.fdsSelection = [];
+  renderCentre();
+}
+
+function openFdsOverlay() {
+  state.fdsSelection = [];
+  overlay.classList.remove('hidden');
+  renderFdsOverlayContent();
 }
 
 function closeOverlay() {

@@ -1,4 +1,4 @@
-import { get, put } from '../db.js';
+import { get, put, getAll } from '../db.js';
 import { CAMPAIGN_ID } from '../seed/blueprint-v1.js';
 import { MISSION_RATINGS, MISSION_STATUS } from './mission.js';
 
@@ -41,6 +41,25 @@ export async function updateIntegrityAfterMission(mission) {
     } else if (integrity.lastMissionDate !== today) {
       integrity.consecutiveMisses = 1;
     }
+  }
+
+  await put('integrity', integrity);
+  return integrity;
+}
+
+export async function adjustIntegrityAfterDelete(deletedMission) {
+  const integrity = await getIntegrity();
+
+  if (deletedMission.isFds || deletedMission.rating === MISSION_RATINGS.MINIMUM) {
+    integrity.fdsCount = Math.max(0, (integrity.fdsCount || 0) - 1);
+  }
+
+  if (integrity.lastMissionDate === deletedMission.date) {
+    const all = await getAll('missions');
+    const remaining = all
+      .filter((m) => m.status === MISSION_STATUS.COMPLETE && m.rating !== MISSION_RATINGS.ABANDONED)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    integrity.lastMissionDate = remaining[0]?.date || null;
   }
 
   await put('integrity', integrity);

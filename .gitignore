@@ -1,2 +1,17 @@
 .certs/
 scripts/cloudflared.exe
+.GarminDb/
+HealthData/
+**/GarminConnectConfig.json
+AthleteOS-exports/
+*.sqlite
+*.sqlite3
+*.db
+scripts/garmin-bridge.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+garmin-snapshot.json
+**/garmin-snapshot*.json
+scripts/fixtures/*.db

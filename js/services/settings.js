@@ -5,7 +5,9 @@ export const SETTINGS_ID = 'user';
 export const DEFAULT_SETTINGS = {
   id: SETTINGS_ID,
   weightUnit: 'kg',
-  restTimerSeconds: 60
+  restTimerSeconds: 60,
+  showNextExerciseOnRest: true,
+  restTimerSoundEnabled: true
 };
 
 const KG_TO_LBS = 2.20462;

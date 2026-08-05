@@ -1,4 +1,4 @@
-import { get, getAll, put, generateId, todayDateString } from '../db.js';
+import { get, getAll, put, remove, generateId, todayDateString } from '../db.js';
 import { CAMPAIGN_ID } from '../seed/blueprint-v1.js';
 
 export const MISSION_STATUS = {
@@ -36,6 +36,7 @@ export async function getOrCreateTodayMission(blueprint) {
       rating: null,
       isFds: false,
       fdsExercise: null,
+      fdsExercises: null,
       startedAt: null,
       completedAt: null,
       currentExerciseIndex: 0,
@@ -99,7 +100,8 @@ export async function logSet(mission, exercise, setNumber, actual = {}) {
       durationUnit: actual.durationUnit ?? exercise.durationUnit ?? 's',
       distance: actual.distance ?? exercise.distance ?? null,
       distanceUnit: actual.distanceUnit ?? exercise.distanceUnit ?? 'km',
-      notes: actual.notes ?? ''
+      notes: actual.notes ?? '',
+      elapsedSeconds: actual.elapsedSeconds ?? null
     },
     completedAt: new Date().toISOString()
   };
@@ -111,6 +113,29 @@ export async function logSet(mission, exercise, setNumber, actual = {}) {
 export async function getSetLogsForMission(missionId) {
   const all = await getAll('setLogs');
   return all.filter((l) => l.missionId === missionId);
+}
+
+export async function deleteSetLogsForMission(missionId) {
+  const logs = await getSetLogsForMission(missionId);
+  await Promise.all(logs.map((log) => remove('setLogs', log.id)));
+}
+
+export async function abortMission(mission, blueprint) {
+  await deleteSetLogsForMission(mission.id);
+
+  mission.status = MISSION_STATUS.READY;
+  mission.rating = null;
+  mission.isFds = false;
+  mission.fdsExercise = null;
+  mission.fdsExercises = null;
+  mission.startedAt = null;
+  mission.completedAt = null;
+  mission.currentExerciseIndex = 0;
+  mission.currentSet = 1;
+  mission.skippedExercises = [];
+  mission.exercises = structuredClone(blueprint.exercises);
+
+  return saveMission(mission);
 }
 
 export async function getPreviousPerformance(exerciseId, excludeMissionId = null) {
@@ -181,7 +206,8 @@ export async function completeMission(mission, rating, options = {}) {
   mission.completedAt = new Date().toISOString();
   if (options.isFds) {
     mission.isFds = true;
-    mission.fdsExercise = options.fdsExercise || null;
+    mission.fdsExercises = options.fdsExercises || null;
+    mission.fdsExercise = options.fdsExercise || options.fdsExercises?.[0] || null;
     mission.rating = MISSION_RATINGS.MINIMUM;
   }
   return saveMission(mission);
@@ -209,6 +235,15 @@ export async function getMissionHistory(limit = 10) {
     .filter((m) => m.status === MISSION_STATUS.COMPLETE)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, limit);
+}
+
+export async function deleteCompletedMission(missionId) {
+  const mission = await get('missions', missionId);
+  if (!mission || mission.status !== MISSION_STATUS.COMPLETE) return null;
+
+  await deleteSetLogsForMission(missionId);
+  await remove('missions', missionId);
+  return mission;
 }
 
 export function getExerciseTotalSets(exercise) {

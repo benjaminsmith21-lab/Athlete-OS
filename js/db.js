@@ -1,5 +1,5 @@
 const DB_NAME = 'athlete-os';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 const STORES = {
   campaigns: { keyPath: 'id' },
@@ -7,7 +7,24 @@ const STORES = {
   missions: { keyPath: 'id', indexes: [{ name: 'date', keyPath: 'date' }, { name: 'status', keyPath: 'status' }] },
   setLogs: { keyPath: 'id', indexes: [{ name: 'missionId', keyPath: 'missionId' }, { name: 'exerciseId', keyPath: 'exerciseId' }] },
   integrity: { keyPath: 'campaignId' },
-  settings: { keyPath: 'id' }
+  settings: { keyPath: 'id' },
+  bodyMeasurements: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'date', keyPath: 'date', unique: true },
+      { name: 'recordedAt', keyPath: 'recordedAt' },
+      { name: 'source', keyPath: 'source' }
+    ]
+  },
+  dailyHealth: { keyPath: 'localDate' },
+  garminActivities: {
+    keyPath: 'sourceActivityId',
+    indexes: [
+      { name: 'startedAt', keyPath: 'startedAt' },
+      { name: 'type', keyPath: 'type' }
+    ]
+  },
+  integrationSyncState: { keyPath: 'integration' }
 };
 
 let dbPromise = null;
@@ -23,7 +40,10 @@ export function openDB() {
         for (const [name, config] of Object.entries(STORES)) {
           if (!db.objectStoreNames.contains(name)) {
             const store = db.createObjectStore(name, { keyPath: config.keyPath });
-            (config.indexes || []).forEach((idx) => store.createIndex(idx.name, idx.keyPath));
+            (config.indexes || []).forEach((idx) => {
+              const options = idx.unique ? { unique: true } : {};
+              store.createIndex(idx.name, idx.keyPath, options);
+            });
           }
         }
       };
@@ -62,6 +82,16 @@ export async function put(storeName, value) {
   });
 }
 
+export async function remove(storeName, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function getByIndex(storeName, indexName, value) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -70,6 +100,41 @@ export async function getByIndex(storeName, indexName, value) {
     const req = index.getAll(value);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getOneByIndex(storeName, indexName, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const index = tx.objectStore(storeName).index(indexName);
+    const req = index.get(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function putAll(storeName, values) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    for (const value of values) {
+      store.put(value);
+    }
+    tx.oncomplete = () => resolve(values.length);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function runTransaction(storeNames, mode, fn) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeNames, mode);
+    Promise.resolve(fn(tx))
+      .then(resolve)
+      .catch(reject);
+    tx.onerror = () => reject(tx.error);
   });
 }
 

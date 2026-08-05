@@ -44,6 +44,15 @@ export const BLUEPRINT = {
     'Earlier bedtime beats extra training'
   ],
   finalReminder: "Don't search for a better program. Become the person who executes this one.",
+  bodyMetrics: {
+    weightTrackingEnabled: true,
+    weightRole: 'primary',
+    startWeightKg: null,
+    targetWeightKg: null,
+    initialRollingBaselineKg: null,
+    firstRecordedWeightKg: null,
+    expectedWeeklyChangeKg: { min: -0.5, max: -0.25 }
+  },
   weeklyBlueprints: [
     {
       dayOfWeek: 1,

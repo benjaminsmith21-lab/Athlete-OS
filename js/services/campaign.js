@@ -1,9 +1,11 @@
 import { BLUEPRINT, CAMPAIGN_ID } from '../seed/blueprint-v1.js';
-import { get, getAll, put, generateId } from '../db.js';
+import { get, getAll, put } from '../db.js';
+
+export const DEFAULT_BODY_METRICS = BLUEPRINT.bodyMetrics;
 
 export async function seedIfNeeded() {
   const existing = await get('campaigns', CAMPAIGN_ID);
-  if (existing) return existing;
+  if (existing) return mergeCampaignBodyMetrics(existing);
 
   const campaign = {
     id: CAMPAIGN_ID,
@@ -15,7 +17,8 @@ export async function seedIfNeeded() {
     identity: BLUEPRINT.identity,
     progressionRules: BLUEPRINT.progressionRules,
     nutrition: BLUEPRINT.nutrition,
-    finalReminder: BLUEPRINT.finalReminder
+    finalReminder: BLUEPRINT.finalReminder,
+    bodyMetrics: structuredClone(BLUEPRINT.bodyMetrics)
   };
   await put('campaigns', campaign);
 
@@ -40,9 +43,25 @@ export async function seedIfNeeded() {
   return campaign;
 }
 
+function mergeCampaignBodyMetrics(campaign) {
+  if (!campaign.bodyMetrics) {
+    campaign.bodyMetrics = structuredClone(DEFAULT_BODY_METRICS);
+    put('campaigns', campaign);
+  }
+  return campaign;
+}
+
 export async function getActiveCampaign() {
   await seedIfNeeded();
-  return get('campaigns', CAMPAIGN_ID);
+  const campaign = await get('campaigns', CAMPAIGN_ID);
+  return mergeCampaignBodyMetrics(campaign);
+}
+
+export async function updateCampaignBodyMetrics(partial) {
+  const campaign = await getActiveCampaign();
+  campaign.bodyMetrics = { ...campaign.bodyMetrics, ...partial };
+  await put('campaigns', campaign);
+  return campaign;
 }
 
 export async function getBlueprintForDay(dayOfWeek) {

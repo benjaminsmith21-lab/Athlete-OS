@@ -64,6 +64,38 @@ export async function getMonthHeatmapData(year, month) {
   };
 }
 
+export function renderIntegrityHeatmapTile(integritySummary, data) {
+  const headers = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+    .map((d) => `<span class="heatmap-dow">${d}</span>`)
+    .join('');
+
+  const cells = data.cells
+    .map((cell) => {
+      if (cell.empty) return '<span class="heatmap-cell heatmap-empty"></span>';
+      const classes = ['heatmap-cell', `heatmap-l${cell.level}`];
+      if (cell.isToday) classes.push('heatmap-today');
+      const title = cell.label ? `${cell.label}` : '';
+      return `<span class="${classes.join(' ')}" title="${title}">${cell.day}</span>`;
+    })
+    .join('');
+
+  return `
+    <div class="integrity-tile">
+      <div class="integrity-tile-summary">
+        <strong>Integrity</strong>
+        <span>${integritySummary}</span>
+      </div>
+      <p class="integrity-tile-month">${data.monthName} ${data.year}</p>
+      <div class="heatmap-grid">${headers}${cells}</div>
+      <div class="heatmap-legend">
+        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l3"></span> Full</span>
+        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l2"></span> Partial</span>
+        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l1"></span> FDS</span>
+      </div>
+    </div>
+  `;
+}
+
 export function renderHeatmapHtml(data) {
   const headers = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
     .map((d) => `<span class="heatmap-dow">${d}</span>`)
@@ -74,8 +106,8 @@ export function renderHeatmapHtml(data) {
       if (cell.empty) return '<span class="heatmap-cell heatmap-empty"></span>';
       const classes = ['heatmap-cell', `heatmap-l${cell.level}`];
       if (cell.isToday) classes.push('heatmap-today');
-      const title = cell.label ? `${cell.day} — ${cell.label}` : `${cell.day}`;
-      return `<span class="${classes.join(' ')}" title="${title}"></span>`;
+      const title = cell.label ? `${cell.label}` : '';
+      return `<span class="${classes.join(' ')}" title="${title}">${cell.day}</span>`;
     })
     .join('');
 

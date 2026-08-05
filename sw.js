@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v3';
+const CACHE_NAME = 'athlete-os-v13';
 
 const ASSETS = [
   './',
@@ -7,6 +7,7 @@ const ASSETS = [
   './css/app.css',
   './js/app.js',
   './js/db.js',
+  './js/utils/datetime.js',
   './js/seed/blueprint-v1.js',
   './js/services/campaign.js',
   './js/services/mission.js',
@@ -14,6 +15,13 @@ const ASSETS = [
   './js/services/integrity.js',
   './js/services/settings.js',
   './js/services/heatmap.js',
+  './js/services/bodyMeasurement.js',
+  './js/services/bodyTrend.js',
+  './js/services/bodyCoach.js',
+  './js/services/bodyChart.js',
+  './js/services/backup.js',
+  './js/services/garminImport.js',
+  './assets/audio/rest-complete.wav',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

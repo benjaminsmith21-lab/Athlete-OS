@@ -14,6 +14,7 @@ REQUIRED_FILES = [
     'css/app.css',
     'js/app.js',
     'js/db.js',
+    'js/utils/datetime.js',
     'js/seed/blueprint-v1.js',
     'js/services/campaign.js',
     'js/services/mission.js',
@@ -21,6 +22,13 @@ REQUIRED_FILES = [
     'js/services/integrity.js',
     'js/services/settings.js',
     'js/services/heatmap.js',
+    'js/services/bodyMeasurement.js',
+    'js/services/bodyTrend.js',
+    'js/services/bodyCoach.js',
+    'js/services/bodyChart.js',
+    'js/services/backup.js',
+    'js/services/garminImport.js',
+    'assets/audio/rest-complete.wav',
     'icons/icon-192.png',
     'icons/icon-512.png',
 ]
@@ -34,6 +42,14 @@ def test_blueprint_seed():
     assert 'weeklyBlueprints' in text
     assert text.count('dayOfWeek:') == 7
     assert 'FDS_FALLBACKS' in text
+    assert 'bodyMetrics' in text
+
+def test_service_worker_cache():
+    text = (ROOT / 'sw.js').read_text(encoding='utf-8')
+    assert 'bodyMeasurement.js' in text
+    assert 'garminImport.js' in text
+    assert 'rest-complete.wav' in text
+    assert 'datetime.js' in text
 
 def test_manifest():
     data = json.loads((ROOT / 'manifest.json').read_text(encoding='utf-8'))
@@ -49,6 +65,7 @@ def test_server():
 if __name__ == '__main__':
     test_local_files()
     test_blueprint_seed()
+    test_service_worker_cache()
     test_manifest()
     try:
         test_server()
