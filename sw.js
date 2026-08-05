@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v13';
+const CACHE_NAME = 'athlete-os-v14';
 
 const ASSETS = [
   './',
@@ -21,6 +21,8 @@ const ASSETS = [
   './js/services/bodyChart.js',
   './js/services/backup.js',
   './js/services/garminImport.js',
+  './js/services/garminTrend.js',
+  './js/services/garminCoach.js',
   './assets/audio/rest-complete.wav',
   './icons/icon-192.png',
   './icons/icon-512.png'

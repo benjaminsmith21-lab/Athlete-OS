@@ -28,6 +28,8 @@ REQUIRED_FILES = [
     'js/services/bodyChart.js',
     'js/services/backup.js',
     'js/services/garminImport.js',
+    'js/services/garminTrend.js',
+    'js/services/garminCoach.js',
     'assets/audio/rest-complete.wav',
     'icons/icon-192.png',
     'icons/icon-512.png',
@@ -48,6 +50,8 @@ def test_service_worker_cache():
     text = (ROOT / 'sw.js').read_text(encoding='utf-8')
     assert 'bodyMeasurement.js' in text
     assert 'garminImport.js' in text
+    assert 'garminTrend.js' in text
+    assert 'garminCoach.js' in text
     assert 'rest-complete.wav' in text
     assert 'datetime.js' in text
 

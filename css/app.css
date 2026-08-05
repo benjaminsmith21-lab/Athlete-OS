@@ -669,6 +669,18 @@ body {
   padding: 20px 16px calc(20px + var(--safe-bottom));
 }
 
+.overlay--weigh-in {
+  align-items: center;
+  padding: 24px 20px calc(24px + var(--safe-bottom));
+}
+
+.overlay--weigh-in .overlay-panel {
+  width: min(100%, 340px);
+  max-height: min(85dvh, 520px);
+  border-radius: 16px;
+  padding: 18px 16px 20px;
+}
+
 .overlay-title {
   font-size: 16px;
   font-weight: 600;
@@ -1336,6 +1348,13 @@ body {
   line-height: 1.4;
 }
 
+.body-status-recovery {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
 .body-save-flash {
   font-size: 13px;
   color: #6b8f4e;
@@ -1360,17 +1379,23 @@ body {
 
 .weigh-in-weight-input {
   flex: 1;
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
-  padding: 12px 16px;
-  min-height: 56px;
+  padding: 10px 14px;
+  min-height: 48px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
   color: var(--text);
   text-align: center;
+}
+
+.overlay--weigh-in .weigh-in-weight-input {
+  font-size: 24px;
+  min-height: 44px;
+  padding: 8px 12px;
 }
 
 .weigh-in-detail-input {
@@ -1606,4 +1631,50 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 16px;
+}
+
+/* Health Intelligence screen */
+.health-section {
+  margin-bottom: 8px;
+}
+
+.health-section--recovery {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+}
+
+.health-section--body {
+  padding-bottom: 4px;
+}
+
+.health-subsection-label {
+  margin-top: 20px;
+}
+
+.health-empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.health-recovery-date {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.health-recovery-grid {
+  margin-bottom: 16px;
+}
+
+.body-metric-card .body-metric-sub {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
 }

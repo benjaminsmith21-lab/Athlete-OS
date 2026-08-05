@@ -76,13 +76,24 @@ import {
 import {
   importGarminSnapshot,
   getGarminSyncState,
-  getLatestDailyHealth,
+  getAllDailyHealth,
   getGarminActivities,
   formatDurationSeconds,
   formatDistanceMeters,
   formatActivityType,
   formatGarminSyncTime
 } from './services/garminImport.js';
+import {
+  getRecentDailyHealth,
+  getSleepSevenDayAverage,
+  getRhrSevenDayAverage,
+  getHrvSevenDayAverage,
+  getStepsSevenDayAverage,
+  getStressSevenDayAverage,
+  formatSleepDuration,
+  buildRecoveryTeaserLine
+} from './services/garminTrend.js';
+import { getGarminCoachInsights } from './services/garminCoach.js';
 import { getLocalDateString, formatDisplayDate } from './utils/datetime.js';
 
 const state = {
@@ -765,16 +776,25 @@ async function buildBodyStatusCardHtml() {
   const thirty = getThirtyDayChange(measurements, today);
   const insight = getHighConfidenceInsight(measurements, state.campaign, today);
   const flash = state.bodySaveFlash ? `<p class="body-save-flash">${escapeHtml(state.bodySaveFlash)}</p>` : '';
+  const dailyHealth = await getAllDailyHealth();
+  const recoveryTeaser = buildRecoveryTeaserLine(dailyHealth, today);
+  const recoveryHtml = recoveryTeaser
+    ? `<p class="body-status-recovery">${escapeHtml(recoveryTeaser)}</p>`
+    : '';
 
   const logLabel = todayM ? "EDIT TODAY'S WEIGH-IN" : 'LOG WEIGHT';
   const logId = todayM ? 'btn-edit-weight' : 'btn-log-weight';
 
   if (!measurements.length) {
+    const viewHealthLink = dailyHealth.length
+      ? `<div class="body-status-header"><p class="section-label">Body Status</p><button type="button" class="body-status-link" id="btn-view-body-comp">View health</button></div>`
+      : '<p class="section-label">Body Status</p>';
     return `
       <div class="body-status-card">
-        <p class="section-label">Body Status</p>
+        ${viewHealthLink}
         <p class="body-status-empty">No weigh-ins recorded.</p>
         <p class="body-status-hint">Your trend starts with today's reading.</p>
+        ${recoveryHtml}
         ${flash}
         <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
       </div>
@@ -787,7 +807,7 @@ async function buildBodyStatusCardHtml() {
       <div class="body-status-card body-status-card--logged">
         <div class="body-status-header">
           <p class="section-label">Body Status</p>
-          <button type="button" class="body-status-link" id="btn-view-body-comp">View trend</button>
+          <button type="button" class="body-status-link" id="btn-view-body-comp">View health</button>
         </div>
         <div class="body-status-grid">
           <div class="body-status-stat">
@@ -803,6 +823,7 @@ async function buildBodyStatusCardHtml() {
             <span class="body-status-value">${formatWeightChange(thirty.change)}</span>
           </div>
         </div>
+        ${recoveryHtml}
         ${insight ? `<p class="body-status-insight">${escapeHtml(insight.message)}</p>` : ''}
         ${flash}
         <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
@@ -814,7 +835,7 @@ async function buildBodyStatusCardHtml() {
     <div class="body-status-card">
       <div class="body-status-header">
         <p class="section-label">Body Status</p>
-        <button type="button" class="body-status-link" id="btn-view-body-comp">View trend</button>
+        <button type="button" class="body-status-link" id="btn-view-body-comp">View health</button>
       </div>
       <div class="body-status-grid">
         <div class="body-status-stat">
@@ -826,6 +847,7 @@ async function buildBodyStatusCardHtml() {
           <span class="body-status-value body-status-not-recorded">NOT RECORDED</span>
         </div>
       </div>
+      ${recoveryHtml}
       ${flash}
       <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
     </div>
@@ -883,6 +905,7 @@ async function openWeighInOverlay(isEdit = false, measurementId = null) {
     <button type="button" class="btn-primary" id="btn-save-weigh-in">${editing ? "Save Weigh-In" : 'Save Weigh-In'}</button>
     <button type="button" class="btn-secondary" id="btn-cancel-weigh-in">Cancel</button>
   `;
+  overlay.classList.add('overlay--weigh-in');
   overlay.classList.remove('hidden');
 
   const weightInput = $('#weigh-in-weight');
@@ -976,11 +999,111 @@ function openWeighInConfirm(message, onConfirm) {
   $('#btn-back-weigh-in').addEventListener('click', () => openWeighInOverlay(true));
 }
 
+function formatGarminRollingSub(rolling, formatter) {
+  if (rolling.average == null) return '';
+  const label = rolling.provisional ? '7-day avg (provisional)' : '7-day avg';
+  const value = formatter(rolling.average);
+  return `<span class="body-metric-sub">${label}: ${value}${rolling.provisional ? ' *' : ''}</span>`;
+}
+
+function buildRecoverySectionHtml(dailyHealth, activities, garminSync, today) {
+  if (!dailyHealth.length) {
+    return `
+      <div class="health-section health-section--recovery">
+        <p class="section-label">Recovery</p>
+        <p class="health-empty">Import a Garmin snapshot in Settings to see sleep, heart rate, and activity trends.</p>
+      </div>
+    `;
+  }
+
+  const latest = getRecentDailyHealth(dailyHealth, today);
+  const dateLabel = latest ? formatDisplayDate(latest.localDate) : '—';
+  const sleepSeven = getSleepSevenDayAverage(dailyHealth, today);
+  const rhrSeven = getRhrSevenDayAverage(dailyHealth, today);
+  const hrvSeven = getHrvSevenDayAverage(dailyHealth, today);
+  const stepsSeven = getStepsSevenDayAverage(dailyHealth, today);
+  const stressSeven = getStressSevenDayAverage(dailyHealth, today);
+
+  const sleepMain = latest?.sleep?.totalSeconds != null ? formatSleepDuration(latest.sleep.totalSeconds) : '—';
+  const sleepScore =
+    latest?.sleep?.score != null ? `<span class="body-metric-sub">Score ${latest.sleep.score}</span>` : '';
+  const rhrMain = latest?.restingHeartRateBpm != null ? `${latest.restingHeartRateBpm} bpm` : '—';
+  const hrvMain = latest?.hrvNightlyAverageMs != null ? `${latest.hrvNightlyAverageMs} ms` : '—';
+  const stepsMain = latest?.steps != null ? latest.steps.toLocaleString('en-AU') : '—';
+  const stressMain = latest?.averageStress != null ? String(latest.averageStress) : '—';
+
+  const activityHtml = activities.length
+    ? activities
+        .map((a) => {
+          const dist = formatDistanceMeters(a.distanceMeters);
+          const dur = a.durationSeconds ? formatDurationSeconds(a.durationSeconds) : '—';
+          const parts = [formatActivityType(a.type)];
+          if (dist) parts.push(dist);
+          if (dur !== '—') parts.push(dur);
+          return `<p class="garmin-activity-line">${escapeHtml(parts.join(' · '))}</p>`;
+        })
+        .join('')
+    : '<p class="settings-empty">No activities imported yet.</p>';
+
+  const garminInsights = getGarminCoachInsights(dailyHealth, garminSync, today);
+  const garminInsightHtml = garminInsights
+    .map(
+      (i) => `
+      <div class="coach-note body-coach-note body-coach-${i.type}">
+        <strong>${escapeHtml(i.title)}</strong><br>${escapeHtml(i.message)}
+      </div>
+    `
+    )
+    .join('');
+
+  return `
+    <div class="health-section health-section--recovery">
+      <p class="section-label">Recovery</p>
+      <p class="health-recovery-date">${escapeHtml(dateLabel)}</p>
+      <div class="body-metric-summary health-recovery-grid">
+        <div class="body-metric-card">
+          <span>Last night sleep</span>
+          <strong>${escapeHtml(sleepMain)}</strong>
+          ${sleepScore}
+          ${formatGarminRollingSub(sleepSeven, (v) => formatSleepDuration(Math.round(v)) || '—')}
+        </div>
+        <div class="body-metric-card">
+          <span>Resting HR</span>
+          <strong>${escapeHtml(rhrMain)}</strong>
+          ${formatGarminRollingSub(rhrSeven, (v) => `${Math.round(v)} bpm`)}
+        </div>
+        <div class="body-metric-card">
+          <span>HRV (nightly avg)</span>
+          <strong>${escapeHtml(hrvMain)}</strong>
+          ${formatGarminRollingSub(hrvSeven, (v) => `${Math.round(v)} ms`)}
+        </div>
+        <div class="body-metric-card">
+          <span>Steps</span>
+          <strong>${stepsMain}</strong>
+          ${formatGarminRollingSub(stepsSeven, (v) => Math.round(v).toLocaleString('en-AU'))}
+        </div>
+        <div class="body-metric-card">
+          <span>Average stress</span>
+          <strong>${escapeHtml(stressMain)}</strong>
+          ${formatGarminRollingSub(stressSeven, (v) => String(Math.round(v)))}
+        </div>
+      </div>
+
+      ${garminInsightHtml}
+
+      <p class="section-label health-subsection-label">Recent Activity</p>
+      ${activityHtml}
+
+      <p class="garmin-sync-meta">Last import: ${escapeHtml(formatGarminSyncTime(garminSync.lastSuccessAt))}</p>
+    </div>
+  `;
+}
+
 async function renderBodyComposition() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'body';
-  setHeader('Body Composition');
+  setHeader('Health Intelligence');
 
   await loadBodyMeasurements();
   const measurements = state.bodyMeasurements;
@@ -1001,6 +1124,11 @@ async function renderBodyComposition() {
     campaignStartDate: state.campaign.startDate,
     targetWeightKg: state.campaign.bodyMetrics?.targetWeightKg
   });
+
+  const dailyHealth = await getAllDailyHealth();
+  const garminSync = await getGarminSyncState();
+  const activities = await getGarminActivities(10);
+  const recoveryHtml = buildRecoverySectionHtml(dailyHealth, activities, garminSync, today);
 
   const rangeButtons = ['campaign', '30d', '6mo', '1y', 'all']
     .map(
@@ -1042,24 +1170,29 @@ async function renderBodyComposition() {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-scroll">
-        <p class="section-label">Trend Intelligence</p>
-        <div class="body-metric-summary">
-          <div class="body-metric-card"><span>Latest</span><strong>${latest ? `${latest.weightKg.toFixed(1)} kg` : '—'}</strong></div>
-          <div class="body-metric-card"><span>7-day avg</span><strong>${formatKg(seven.average, seven.provisional)}</strong></div>
-          <div class="body-metric-card"><span>30-day change</span><strong>${formatWeightChange(thirty.change)}</strong></div>
-          <div class="body-metric-card"><span>Campaign change</span><strong>${formatWeightChange(campaignChange.change)}</strong></div>
-          <div class="body-metric-card"><span>Weigh-in consistency</span><strong>${consistency}%</strong></div>
+        <div class="health-section health-section--body">
+          <p class="section-label">Body Composition</p>
+          <p class="section-label health-subsection-label">Trend Intelligence</p>
+          <div class="body-metric-summary">
+            <div class="body-metric-card"><span>Latest</span><strong>${latest ? `${latest.weightKg.toFixed(1)} kg` : '—'}</strong></div>
+            <div class="body-metric-card"><span>7-day avg</span><strong>${formatKg(seven.average, seven.provisional)}</strong></div>
+            <div class="body-metric-card"><span>30-day change</span><strong>${formatWeightChange(thirty.change)}</strong></div>
+            <div class="body-metric-card"><span>Campaign change</span><strong>${formatWeightChange(campaignChange.change)}</strong></div>
+            <div class="body-metric-card"><span>Weigh-in consistency</span><strong>${consistency}%</strong></div>
+          </div>
+
+          ${seven.provisional && seven.count > 0 ? `<p class="body-calibrating">Trend calibrating — ${seven.count} of 7 initial weigh-ins recorded.</p>` : ''}
+
+          <div class="chart-range-control segmented-control">${rangeButtons}</div>
+          <div class="weight-chart">${chartSvg}</div>
+
+          ${insightHtml}
+
+          <p class="section-label health-subsection-label">Measurement History</p>
+          <div class="workout-history-list">${historyHtml}</div>
         </div>
 
-        ${seven.provisional && seven.count > 0 ? `<p class="body-calibrating">Trend calibrating — ${seven.count} of 7 initial weigh-ins recorded.</p>` : ''}
-
-        <div class="chart-range-control segmented-control">${rangeButtons}</div>
-        <div class="weight-chart">${chartSvg}</div>
-
-        ${insightHtml}
-
-        <p class="section-label">Measurement History</p>
-        <div class="workout-history-list">${historyHtml}</div>
+        ${recoveryHtml}
       </div>
       <div class="screen-footer">
         <button type="button" class="btn-primary" id="btn-log-weight-body">Log Weight</button>
@@ -1097,63 +1230,6 @@ async function renderBodyComposition() {
 
   $('#btn-log-weight-body').addEventListener('click', () => openWeighInOverlay());
   $('#btn-back-centre-body').addEventListener('click', () => renderCentre());
-}
-
-async function renderGarminIntelligence() {
-  clearRestTimer();
-  clearExerciseTimer();
-  state.screen = 'garmin';
-  setHeader('Garmin Intelligence');
-
-  const latest = await getLatestDailyHealth();
-  const activities = await getGarminActivities(5);
-  const sync = await getGarminSyncState();
-
-  const dateLabel = latest ? formatDisplayDate(latest.localDate) : 'No data';
-  const steps = latest?.steps != null ? latest.steps.toLocaleString('en-AU') : '—';
-  const sleep = latest?.sleep?.totalSeconds != null ? formatDurationSeconds(latest.sleep.totalSeconds) : '—';
-  const rhr = latest?.restingHeartRateBpm != null ? `${latest.restingHeartRateBpm} bpm` : '—';
-  const hrv = latest?.hrvNightlyAverageMs != null ? `${latest.hrvNightlyAverageMs} ms` : '—';
-  const stress = latest?.averageStress != null ? String(latest.averageStress) : '—';
-
-  const activityHtml = activities.length
-    ? activities
-        .map((a) => {
-          const dist = formatDistanceMeters(a.distanceMeters);
-          const dur = a.durationSeconds ? formatDurationSeconds(a.durationSeconds) : '—';
-          const parts = [formatActivityType(a.type)];
-          if (dist) parts.push(dist);
-          if (dur !== '—') parts.push(dur);
-          return `<p class="garmin-activity-line">${escapeHtml(parts.join(' · '))}</p>`;
-        })
-        .join('')
-    : '<p class="settings-empty">No activities imported yet.</p>';
-
-  screenRoot.innerHTML = `
-    <div class="screen">
-      <div class="screen-scroll">
-        <p class="section-label">Garmin Intelligence</p>
-        <p class="garmin-inspect-date">${escapeHtml(dateLabel)}</p>
-        <div class="body-metric-summary garmin-inspect-grid">
-          <div class="body-metric-card"><span>Steps</span><strong>${steps}</strong></div>
-          <div class="body-metric-card"><span>Sleep</span><strong>${sleep}</strong></div>
-          <div class="body-metric-card"><span>Resting HR</span><strong>${rhr}</strong></div>
-          <div class="body-metric-card"><span>HRV</span><strong>${hrv}</strong></div>
-          <div class="body-metric-card"><span>Stress</span><strong>${stress}</strong></div>
-        </div>
-
-        <p class="section-label">Recent Activity</p>
-        ${activityHtml}
-
-        <p class="garmin-sync-meta">Last import: ${escapeHtml(formatGarminSyncTime(sync.lastSuccessAt))}</p>
-      </div>
-      <div class="screen-footer">
-        <button type="button" class="btn-secondary" id="btn-garmin-back">Back to Settings</button>
-      </div>
-    </div>
-  `;
-
-  $('#btn-garmin-back').addEventListener('click', () => renderSettings());
 }
 
 function openDeleteMeasurementOverlay(id) {
@@ -1352,7 +1428,7 @@ async function renderSettings() {
             ${garminFlash}
             <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-garmin">${garminImportLabel}</button>
             <input type="file" id="import-garmin-file" accept=".json,application/json" hidden>
-            ${garminSync.lastSuccessAt ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-view-garmin">View Garmin Data</button>' : ''}
+            ${garminSync.lastSuccessAt ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-view-garmin">Open Health Intelligence</button>' : ''}
           </div>
         </div>
 
@@ -1435,7 +1511,7 @@ async function renderSettings() {
     renderSettings();
   });
 
-  $('#btn-view-garmin')?.addEventListener('click', () => renderGarminIntelligence());
+  $('#btn-view-garmin')?.addEventListener('click', () => renderBodyComposition());
 
   $('#btn-export-backup').addEventListener('click', async () => {
     const data = await exportFullBackup();
@@ -2044,6 +2120,7 @@ function openFdsOverlay() {
 
 function closeOverlay() {
   overlay.classList.add('hidden');
+  overlay.classList.remove('overlay--weigh-in');
   overlayContent.innerHTML = '';
 }
 
