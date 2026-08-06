@@ -189,6 +189,7 @@ export async function abortMission(mission, blueprint) {
   mission.currentExerciseIndex = 0;
   mission.currentSet = 1;
   mission.skippedExercises = [];
+  mission.warmupCompletedAt = null;
   mission.exercises = structuredClone(blueprint.exercises);
 
   return saveMission(mission);

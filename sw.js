@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v29';
+const CACHE_NAME = 'athlete-os-v30';
 
 const ASSETS = [
   './',
@@ -9,6 +9,7 @@ const ASSETS = [
   './js/db.js',
   './js/utils/datetime.js',
   './js/seed/blueprint-v1.js',
+  './js/seed/warmup-v1.js',
   './js/services/campaign.js',
   './js/services/mission.js',
   './js/services/coach.js',

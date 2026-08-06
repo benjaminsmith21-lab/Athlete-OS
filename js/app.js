@@ -1,4 +1,5 @@
 import { OPERATIONS, FDS_FALLBACKS, OPERATION_META } from './seed/blueprint-v1.js';
+import { WARMUP_DURATION_SECONDS, WARMUP_STEPS } from './seed/warmup-v1.js';
 import { getActiveCampaign, getTodayBlueprint, getCampaignWeek, updateCampaignBodyMetrics } from './services/campaign.js';
 import {
   getExerciseHistory,
@@ -159,12 +160,17 @@ const state = {
   durationTimerTotal: 0,
   durationTimerTargetSeconds: null,
   durationTimerSoundPlayed: false,
-  activeExerciseFields: null
+  activeExerciseFields: null,
+  warmupPhase: 'idle',
+  warmupStepIndex: 0,
+  warmupRemaining: WARMUP_DURATION_SECONDS,
+  warmupSoundPlayed: false
 };
 
 let restTimerInterval = null;
 let exerciseTimerInterval = null;
 let durationTimerInterval = null;
+let warmupTimerInterval = null;
 let restCompleteAudio = null;
 
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
@@ -333,6 +339,186 @@ function clearExerciseTimer() {
   clearDurationTimer();
 }
 
+function resetWarmupState() {
+  state.warmupPhase = 'idle';
+  state.warmupStepIndex = 0;
+  state.warmupRemaining = WARMUP_DURATION_SECONDS;
+  state.warmupSoundPlayed = false;
+}
+
+function clearWarmupTimer() {
+  if (warmupTimerInterval) {
+    clearInterval(warmupTimerInterval);
+    warmupTimerInterval = null;
+  }
+}
+
+function formatWarmupStepRx(step, unit) {
+  if (step.flowLines?.length) {
+    return step.rx;
+  }
+  if (step.weightKg != null) {
+    const w = kgToUnit(step.weightKg, unit);
+    return `${step.rx} · ${w}${unit}`;
+  }
+  if (step.weightMinKg != null && step.weightMaxKg != null) {
+    const wMin = kgToUnit(step.weightMinKg, unit);
+    const wMax = kgToUnit(step.weightMaxKg, unit);
+    return `${step.rx} · ${wMin}–${wMax}${unit}`;
+  }
+  return step.rx;
+}
+
+function renderWarmupDots(activeIndex) {
+  return `
+    <div class="exercise-dots" aria-hidden="true">
+      ${WARMUP_STEPS.map((_, i) => {
+        const classes = ['exercise-dot'];
+        if (i < activeIndex) classes.push('exercise-dot--done');
+        if (i === activeIndex) classes.push('exercise-dot--active');
+        return `<span class="${classes.join(' ')}"></span>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderWarmupScreen() {
+  const step = WARMUP_STEPS[state.warmupStepIndex];
+  const unit = state.settings?.weightUnit || 'kg';
+  const total = WARMUP_DURATION_SECONDS;
+  const remaining = state.warmupRemaining;
+  const progress =
+    state.warmupPhase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : 0;
+  const displayTime = formatDurationClock(state.warmupPhase === 'idle' ? total : remaining);
+  const isActive = state.warmupPhase === 'running';
+  const disabled = isActive ? 'disabled' : '';
+  const activeClass = isActive ? ' timed-countdown-ring--active' : '';
+  const ariaLabel = isActive ? 'Warm-up in progress' : 'Start warm-up';
+  const rx = formatWarmupStepRx(step, unit);
+  const flowHtml = step.flowLines?.length
+    ? `<ul class="warmup-flow-lines">${step.flowLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
+    : '';
+
+  return `
+    <div class="warmup-layout">
+      <p class="section-label">Warm-up · Minute ${step.minute} of ${WARMUP_STEPS.length}</p>
+      <div class="exercise-card warmup-card">
+        <div class="warmup-ring-wrap">
+          <button type="button" class="timed-countdown-ring${activeClass}" id="btn-warmup-ring"
+            aria-label="${ariaLabel}" style="--timed-progress: ${progress}%" ${disabled}>
+            <span class="timed-countdown-time">${displayTime}</span>
+          </button>
+        </div>
+        <h2 class="exercise-name warmup-title">${escapeHtml(step.title)}</h2>
+        <p class="warmup-rx">${escapeHtml(rx)}</p>
+        ${flowHtml}
+        <p class="warmup-purpose">${escapeHtml(step.purpose)}</p>
+      </div>
+      ${renderWarmupDots(state.warmupStepIndex)}
+    </div>
+  `;
+}
+
+function bindWarmupControls(skipLink = true) {
+  $('#btn-warmup-ring')?.addEventListener('click', () => {
+    if (state.warmupPhase === 'running') return;
+    unlockRestCompleteSound();
+    state.warmupPhase = 'running';
+    state.warmupRemaining = WARMUP_DURATION_SECONDS;
+    state.warmupSoundPlayed = false;
+    refreshWarmupView();
+    startWarmupInterval();
+  });
+
+  if (skipLink) {
+    $('#btn-skip-warmup')?.addEventListener('click', () => finishWarmup());
+  }
+}
+
+function refreshWarmupView() {
+  const body = $('.screen-body');
+  if (body) {
+    body.innerHTML = renderWarmupScreen();
+    bindWarmupControls(false);
+  }
+}
+
+function startWarmupInterval() {
+  clearWarmupTimer();
+  const soundPlayed = { value: state.warmupSoundPlayed };
+  if (state.settings?.restTimerSoundEnabled) {
+    preloadRestCompleteSound();
+    maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, soundPlayed);
+    state.warmupSoundPlayed = soundPlayed.value;
+  }
+
+  warmupTimerInterval = setInterval(() => {
+    state.warmupRemaining -= 1;
+    const tickSound = { value: state.warmupSoundPlayed };
+    if (state.settings?.restTimerSoundEnabled) {
+      maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, tickSound);
+    }
+    state.warmupSoundPlayed = tickSound.value;
+
+    if (state.warmupRemaining <= 0) {
+      clearWarmupTimer();
+      if (state.warmupStepIndex >= WARMUP_STEPS.length - 1) {
+        finishWarmup();
+        return;
+      }
+      state.warmupStepIndex += 1;
+      state.warmupRemaining = WARMUP_DURATION_SECONDS;
+      state.warmupSoundPlayed = false;
+      state.warmupPhase = 'running';
+      refreshWarmupView();
+      startWarmupInterval();
+      return;
+    }
+
+    refreshWarmupView();
+  }, 1000);
+}
+
+async function finishWarmup() {
+  clearWarmupTimer();
+  resetWarmupState();
+  state.mission.warmupCompletedAt = new Date().toISOString();
+  state.mission = await saveMission(state.mission);
+
+  const exercises = getActiveExercises(state.mission);
+  const isChecklistDay = exercises.length > 0 && exercises.every((e) => e.type === 'open' || e.type === 'note_only');
+  if (isChecklistDay) {
+    renderChecklistActive(exercises);
+  } else {
+    renderActive();
+  }
+}
+
+function shouldShowWarmup() {
+  return !state.mission?.warmupCompletedAt;
+}
+
+function renderWarmup() {
+  clearRestTimer();
+  clearExerciseTimer();
+  state.screen = 'warmup';
+  setHeader('Warm-up');
+  resetWarmupState();
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-body screen-body--active">
+        ${renderWarmupScreen()}
+      </div>
+      <div class="screen-footer warmup-footer">
+        <button type="button" class="warmup-skip-link" id="btn-skip-warmup">Skip warm-up</button>
+      </div>
+    </div>
+  `;
+
+  bindWarmupControls();
+}
+
 function formatElapsed(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds));
   const mins = Math.floor(s / 60);
@@ -364,6 +550,7 @@ function renderTimerStrip() {
 async function goHome() {
   clearRestTimer();
   clearExerciseTimer();
+  clearWarmupTimer();
   closeOverlay();
   state.mission = await getMission(state.mission.id);
   state.setLogs = await getSetLogsForMission(state.mission.id);
@@ -2169,7 +2356,7 @@ function renderCentre() {
       primaryLabel = 'Mission Complete';
     } else if (active) {
       primaryLabel = 'Resume Mission';
-      primaryAction = () => renderActive();
+      primaryAction = () => (shouldShowWarmup() ? renderWarmup() : renderActive());
     }
 
     screenRoot.innerHTML = `
@@ -2707,7 +2894,7 @@ function renderBriefing() {
         state.setLogs = [];
         state.checklistDone = new Set();
         state.activeExerciseIndex = 0;
-        renderActive();
+        renderWarmup();
       });
       $('#btn-back-centre').addEventListener('click', () => renderCentre());
   });
@@ -2796,6 +2983,7 @@ async function renderActiveAtIndex(index) {
 async function renderActive() {
   clearRestTimer();
   clearExerciseTimer();
+  clearWarmupTimer();
   state.lastRenderedExerciseId = null;
   state.screen = 'active';
   setHeader('Active Mission');
@@ -3091,7 +3279,7 @@ async function startFdsMission() {
   state.mission.skippedExercises = [];
   state.mission = await saveMission(state.mission);
   state.setLogs = [];
-  renderActive();
+  renderWarmup();
 }
 
 function openDeleteWorkoutOverlay(missionId) {
