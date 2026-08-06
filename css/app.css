@@ -1201,6 +1201,20 @@ body {
   word-break: break-word;
 }
 
+.exercise-note-link--icon {
+  padding: 4px 6px;
+  opacity: 1;
+}
+
+.exercise-note-icon {
+  display: block;
+  opacity: 0.55;
+}
+
+.exercise-note-link--icon:active .exercise-note-icon {
+  opacity: 0.85;
+}
+
 .exercise-note-link.has-note {
   opacity: 1;
 }
@@ -2260,18 +2274,31 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
 }
 
 .timed-countdown-ring {
   width: 120px;
   height: 120px;
+  border: none;
+  padding: 0;
   border-radius: 50%;
   background: conic-gradient(var(--accent) var(--timed-progress, 0%), var(--bg-elevated) 0);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  cursor: pointer;
+  color: inherit;
+}
+
+.timed-countdown-ring:disabled,
+.timed-countdown-ring--active {
+  cursor: default;
+}
+
+.timed-countdown-ring:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .timed-countdown-ring::before {
@@ -2289,16 +2316,6 @@ body {
   font-size: 28px;
   font-weight: 600;
   color: var(--text);
-}
-
-.timed-countdown-label {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.timed-countdown-start {
-  margin-top: 4px;
 }
 
 .exercise-swipe-card.timed-countdown-flash {

@@ -654,7 +654,12 @@ function renderNoteButton(note) {
   if (note) {
     return `<button type="button" class="exercise-note-link has-note" id="btn-exercise-note" title="${escapeHtml(note)}">${escapeHtml(note)}</button>`;
   }
-  return `<button type="button" class="exercise-note-link" id="btn-exercise-note">+ note</button>`;
+  return `<button type="button" class="exercise-note-link exercise-note-link--icon" id="btn-exercise-note" aria-label="Add note">
+    <svg class="exercise-note-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M12 20h9"/>
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+    </svg>
+  </button>`;
 }
 
 function formatDurationClock(totalSeconds) {
@@ -682,33 +687,27 @@ function renderTimedCountdownBlock(exercise, fields) {
   const progress =
     phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
 
-  let phaseLabel = '';
   let displayTime = formatDurationClock(targetSeconds);
   if (phase === 'prep') {
-    phaseLabel = 'Get ready…';
     displayTime = String(Math.ceil(remaining));
   } else if (phase === 'running') {
-    phaseLabel = 'Hang time';
     displayTime = formatDurationClock(remaining);
   } else if (phase === 'done') {
-    phaseLabel = "Time's up";
     displayTime = '0:00';
   }
 
-  const startDisabled = phase === 'prep' || phase === 'running' ? 'disabled' : '';
-  const startLabel = phase === 'done' ? 'Restart Timer' : 'Start Timer';
-  const labelHtml = phaseLabel
-    ? `<p class="timed-countdown-label">${phaseLabel}</p>`
-    : '';
+  const isActive = phase === 'prep' || phase === 'running';
+  const disabled = isActive ? 'disabled' : '';
+  const activeClass = isActive ? ' timed-countdown-ring--active' : '';
+  let ariaLabel = 'Start timer';
+  if (phase === 'done') ariaLabel = 'Restart timer';
+  else if (isActive) ariaLabel = 'Timer in progress';
 
   return `
     <div class="timed-countdown" id="timed-countdown">
-      <div class="timed-countdown-ring" style="--timed-progress: ${progress}%">
+      <button type="button" class="timed-countdown-ring${activeClass}" id="btn-start-duration-timer"
+        aria-label="${ariaLabel}" style="--timed-progress: ${progress}%" ${disabled}>
         <span class="timed-countdown-time">${displayTime}</span>
-      </div>
-      ${labelHtml}
-      <button type="button" class="btn-secondary timed-countdown-start" id="btn-start-duration-timer" ${startDisabled}>
-        ${startLabel}
       </button>
     </div>
   `;
