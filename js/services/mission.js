@@ -110,6 +110,54 @@ export async function logSet(mission, exercise, setNumber, actual = {}) {
   return log;
 }
 
+export async function upsertExerciseLog(mission, exercise, actual = {}) {
+  const existing = await getSetLogsForMission(mission.id);
+  for (const log of existing.filter((l) => l.exerciseId === exercise.id)) {
+    await remove('setLogs', log.id);
+  }
+  return logSet(mission, exercise, 1, actual);
+}
+
+export function getActiveExercises(mission) {
+  return mission.exercises.filter((e) => !mission.skippedExercises?.includes(e.id));
+}
+
+export function isExerciseDone(exercise, setLogs, mission) {
+  return setLogs.some((l) => l.exerciseId === exercise.id) || mission.skippedExercises?.includes(exercise.id);
+}
+
+export function countCompletedExercises(exercises, setLogs, mission) {
+  return exercises.filter((e) => isExerciseDone(e, setLogs, mission)).length;
+}
+
+export function areRequiredExercisesDone(mission, setLogs) {
+  const exercises = getActiveExercises(mission);
+  const required = exercises.filter((e) => e.type !== 'optional' && e.type !== 'note_only');
+  return required.every((e) => isExerciseDone(e, setLogs, mission));
+}
+
+export async function getMissionDurationEstimate(dayOfWeek, operation, exerciseCount) {
+  const missions = await getAll('missions');
+  const durations = missions
+    .filter(
+      (m) =>
+        m.status === MISSION_STATUS.COMPLETE &&
+        m.startedAt &&
+        m.completedAt &&
+        (m.dayOfWeek === dayOfWeek || m.operation === operation)
+    )
+    .map((m) => (new Date(m.completedAt) - new Date(m.startedAt)) / 60000)
+    .filter((mins) => mins > 0 && mins < 240);
+
+  if (durations.length > 0) {
+    const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+    return { label: `avg ${avg} min`, hasHistory: true, minutes: avg };
+  }
+
+  const estimate = Math.max(15, Math.round(exerciseCount * 6));
+  return { label: `~${estimate} min`, hasHistory: false, minutes: estimate };
+}
+
 export async function getSetLogsForMission(missionId) {
   const all = await getAll('setLogs');
   return all.filter((l) => l.missionId === missionId);

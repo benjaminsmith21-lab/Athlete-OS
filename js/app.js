@@ -1,4 +1,4 @@
-import { OPERATIONS, FDS_FALLBACKS } from './seed/blueprint-v1.js';
+import { OPERATIONS, FDS_FALLBACKS, OPERATION_META } from './seed/blueprint-v1.js';
 import { getActiveCampaign, getTodayBlueprint, getCampaignWeek, updateCampaignBodyMetrics } from './services/campaign.js';
 import {
   getExerciseHistory,
@@ -8,6 +8,7 @@ import {
   startMission,
   abortMission,
   logSet,
+  upsertExerciseLog,
   getSetLogsForMission,
   getPreviousPerformance,
   completeMission,
@@ -16,6 +17,11 @@ import {
   deleteCompletedMission,
   advanceMissionPointer,
   getCurrentExercise,
+  getActiveExercises,
+  isExerciseDone,
+  countCompletedExercises,
+  areRequiredExercisesDone,
+  getMissionDurationEstimate,
   isStructuredExercise,
   isChecklistExercise,
   formatPrescription,
@@ -119,7 +125,7 @@ import {
 import { renderGarminChartSvg, getGarminChartDateRange } from './services/garminChart.js';
 import { getProgressionHints, formatExerciseHistoryRows } from './services/progressionCoach.js';
 import { getAll } from './db.js';
-import { getLocalDateString, formatDisplayDate } from './utils/datetime.js';
+import { getLocalDateString, formatDisplayDate, formatMissionDayHeading } from './utils/datetime.js';
 
 const state = {
   screen: 'centre',
@@ -145,7 +151,8 @@ const state = {
   pendingBackup: null,
   pendingBackupMode: 'merge',
   garminImportFlash: null,
-  backupBanner: null
+  backupBanner: null,
+  activeExerciseIndex: null
 };
 
 let restTimerInterval = null;
@@ -550,8 +557,7 @@ function buildAdjustmentPanel(exercise, fields) {
 
 function renderNoteButton(note) {
   if (note) {
-    const preview = note.length > 24 ? `${note.slice(0, 24)}…` : note;
-    return `<button type="button" class="exercise-note-link has-note" id="btn-exercise-note" title="${escapeHtml(note)}">${escapeHtml(preview)}</button>`;
+    return `<button type="button" class="exercise-note-link has-note" id="btn-exercise-note" title="${escapeHtml(note)}">${escapeHtml(note)}</button>`;
   }
   return `<button type="button" class="exercise-note-link" id="btn-exercise-note">+ note</button>`;
 }
@@ -645,59 +651,206 @@ function startActiveTimerTick() {
   }, 1000);
 }
 
-function bindExerciseActions(exercise) {
+function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
+  return `
+    <div class="exercise-dots" aria-hidden="true">
+      ${exercises
+        .map((ex, i) => {
+          const done = isExerciseDone(ex, setLogs, mission);
+          const classes = ['exercise-dot'];
+          if (done) classes.push('exercise-dot--done');
+          if (i === activeIndex) classes.push('exercise-dot--active');
+          return `<span class="${classes.join(' ')}"></span>`;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function bindExerciseActions(exercise, exercises, exerciseIndex) {
   bindDials(screenRoot);
   bindNoteButton();
+  bindExerciseSwipe(exercises, exerciseIndex);
 
   $('#btn-complete-exercise')?.addEventListener('click', async () => {
     unlockRestCompleteSound();
     const actual = collectActualFromForm(exercise);
-    await logSet(state.mission, exercise, 1, actual);
+    await upsertExerciseLog(state.mission, exercise, actual);
+    state.setLogs = await getSetLogsForMission(state.mission.id);
 
-    const { done, mission } = advanceMissionPointer(state.mission);
-    state.mission = await saveMission(mission);
+    state.mission.currentExerciseIndex = Math.max(state.mission.currentExerciseIndex, exerciseIndex + 1);
+    state.mission = await saveMission(state.mission);
 
-    await afterExerciseComplete(done);
+    if (areRequiredExercisesDone(state.mission, state.setLogs)) {
+      await afterExerciseComplete(true);
+      return;
+    }
+
+    const settings = await getSettings();
+    state.settings = settings;
+    if (settings.restTimerSeconds > 0) {
+      renderRestTimer(settings.restTimerSeconds, () => renderActiveAtIndex(exerciseIndex));
+    } else {
+      renderActiveAtIndex(exerciseIndex);
+    }
   });
 
   $('#btn-skip')?.addEventListener('click', async () => {
     if (!state.mission.skippedExercises) state.mission.skippedExercises = [];
-    state.mission.skippedExercises.push(exercise.id);
-    state.mission.currentExerciseIndex += 1;
+    if (!state.mission.skippedExercises.includes(exercise.id)) {
+      state.mission.skippedExercises.push(exercise.id);
+    }
     state.mission = await saveMission(state.mission);
+    state.setLogs = await getSetLogsForMission(state.mission.id);
 
-    const next = getCurrentExercise(state.mission);
-    if (!next) renderComplete(false);
-    else renderActive();
+    if (areRequiredExercisesDone(state.mission, state.setLogs)) {
+      renderComplete(false);
+      return;
+    }
+
+    const nextIndex = Math.min(exerciseIndex + 1, exercises.length - 1);
+    renderActiveAtIndex(nextIndex);
   });
 }
 
-function renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows = [], hints = []) {
-  const progress = (exIndex / totalExercises) * 100;
+async function navigateActiveExercise(index, exercises) {
+  if (index < 0 || index >= exercises.length) return;
+  state.activeExerciseIndex = index;
+  state.mission.currentExerciseIndex = index;
+  state.mission = await saveMission(state.mission);
+  await renderActiveAtIndex(index);
+}
+
+function bindExerciseSwipe(exercises, exerciseIndex) {
+  const card = $('#exercise-swipe-card');
+  if (!card) return;
+
+  let startX = 0;
+  let currentX = 0;
+  let dragging = false;
+  const threshold = 72;
+
+  function resetCard() {
+    card.classList.add('exercise-swipe-card--snap');
+    card.style.transform = '';
+  }
+
+  function finishSwipe() {
+    if (!dragging) return;
+    dragging = false;
+    card.classList.remove('is-dragging');
+
+    if (currentX <= -threshold && exerciseIndex < exercises.length - 1) {
+      card.classList.add('exercise-swipe-card--exit-left');
+      setTimeout(() => navigateActiveExercise(exerciseIndex + 1, exercises), 140);
+      return;
+    }
+    if (currentX >= threshold && exerciseIndex > 0) {
+      card.classList.add('exercise-swipe-card--exit-right');
+      setTimeout(() => navigateActiveExercise(exerciseIndex - 1, exercises), 140);
+      return;
+    }
+    resetCard();
+    currentX = 0;
+  }
+
+  function onStart(clientX) {
+    startX = clientX;
+    dragging = true;
+    card.classList.add('is-dragging');
+    card.classList.remove('exercise-swipe-card--snap', 'exercise-swipe-card--exit-left', 'exercise-swipe-card--exit-right');
+  }
+
+  function onMove(clientX) {
+    if (!dragging) return;
+    currentX = clientX - startX;
+    const rotate = Math.max(-12, Math.min(12, currentX * 0.04));
+    card.style.transform = `translateX(${currentX}px) rotate(${rotate}deg)`;
+  }
+
+  card.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.target.closest('.dial-btn, .exercise-note-link, button, input, textarea')) return;
+      onStart(e.touches[0].clientX);
+    },
+    { passive: true }
+  );
+  card.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!dragging) return;
+      onMove(e.touches[0].clientX);
+    },
+    { passive: true }
+  );
+  card.addEventListener('touchend', finishSwipe);
+  card.addEventListener('touchcancel', finishSwipe);
+
+  card.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.dial-btn, .exercise-note-link, button, input, textarea')) return;
+    e.preventDefault();
+    onStart(e.clientX);
+
+    function onMouseMove(ev) {
+      onMove(ev.clientX);
+    }
+    function onMouseUp() {
+      finishSwipe();
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function renderActiveExerciseBody(
+  exercise,
+  prev,
+  fields,
+  exIndex,
+  totalExercises,
+  rx,
+  historyRows = [],
+  hints = [],
+  completedCount = 0,
+  exercises = [],
+  setLogs = [],
+  mission = null
+) {
+  const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
 
   return `
     <div class="progress-bar-wrap">
       <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
-      <p class="progress-label">Exercise ${exIndex + 1} of ${totalExercises}</p>
+      <p class="progress-label">${completedCount} of ${totalExercises} complete · Exercise ${exIndex + 1}</p>
     </div>
 
     ${renderTimerStrip()}
 
-    <div class="exercise-card">
-      <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-      <p class="exercise-rx">${escapeHtml(rx)}</p>
-      <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
-      ${renderPreviousBlock(prev, historyRows, hints)}
+    <div class="exercise-swipe-stack">
+      <div class="exercise-swipe-card" id="exercise-swipe-card">
+        <div class="exercise-card">
+          <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
+          <p class="exercise-rx">${escapeHtml(rx)}</p>
+          <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+          ${renderPreviousBlock(prev, historyRows, hints)}
+        </div>
+      </div>
     </div>
+    <p class="exercise-swipe-hint">Swipe the card to move between exercises</p>
+    ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
 
     ${buildAdjustmentPanel(exercise, fields)}
   `;
 }
 
-function renderActiveExerciseFooter(exercise) {
+function renderActiveExerciseFooter(exercise, alreadyDone = false) {
+  const label = alreadyDone ? 'Update Exercise' : 'Complete Exercise';
   return `
-    <button type="button" class="btn-primary" id="btn-complete-exercise">Complete Exercise</button>
+    <button type="button" class="btn-primary" id="btn-complete-exercise">${label}</button>
     ${exercise.type === 'optional' ? '<button type="button" class="btn-secondary" id="btn-skip">Skip</button>' : ''}
   `;
 }
@@ -942,37 +1095,36 @@ async function buildBodyStatusCardHtml() {
     ? `<p class="body-status-recovery">${escapeHtml(recoveryTeaser)}</p>`
     : '';
 
-  const logLabel = todayM ? "EDIT TODAY'S WEIGH-IN" : 'LOG WEIGHT';
-  const logId = todayM ? 'btn-edit-weight' : 'btn-log-weight';
+  const headerHtml = `
+    <div class="body-status-header">
+      <p class="section-label">Body Status</p>
+      <button type="button" class="body-status-link" id="btn-view-body-comp">View health</button>
+    </div>
+  `;
 
   if (!measurements.length) {
-    const viewHealthLink = dailyHealth.length
-      ? `<div class="body-status-header"><p class="section-label">Body Status</p><button type="button" class="body-status-link" id="btn-view-body-comp">View health</button></div>`
-      : '<p class="section-label">Body Status</p>';
+    const header = dailyHealth.length ? headerHtml : '<p class="section-label">Body Status</p>';
     return `
       <div class="body-status-card">
-        ${viewHealthLink}
+        ${header}
         <p class="body-status-empty">No weigh-ins recorded.</p>
         <p class="body-status-hint">Your trend starts with today's reading.</p>
         ${recoveryHtml}
         ${flash}
-        <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
+        <button type="button" class="btn-secondary btn-fds-inline" id="btn-log-weight">LOG WEIGHT</button>
       </div>
     `;
   }
 
   if (todayM) {
-    const avgLabel = seven.provisional ? '7-day average (provisional)' : '7-day average';
+    const avgLabel = seven.provisional ? '7-day avg (provisional)' : '7-day avg';
     return `
       <div class="body-status-card body-status-card--logged">
-        <div class="body-status-header">
-          <p class="section-label">Body Status</p>
-          <button type="button" class="body-status-link" id="btn-view-body-comp">View health</button>
-        </div>
+        ${headerHtml}
         <div class="body-status-grid">
           <div class="body-status-stat">
             <span class="body-status-label">Today</span>
-            <span class="body-status-value">${todayM.weightKg.toFixed(1)} kg</span>
+            <button type="button" class="body-status-value body-status-value--tap" id="btn-edit-weight">${todayM.weightKg.toFixed(1)} kg</button>
           </div>
           <div class="body-status-stat">
             <span class="body-status-label">${avgLabel}</span>
@@ -986,17 +1138,13 @@ async function buildBodyStatusCardHtml() {
         ${recoveryHtml}
         ${insight ? `<p class="body-status-insight">${escapeHtml(insight.message)}</p>` : ''}
         ${flash}
-        <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
       </div>
     `;
   }
 
   return `
     <div class="body-status-card">
-      <div class="body-status-header">
-        <p class="section-label">Body Status</p>
-        <button type="button" class="body-status-link" id="btn-view-body-comp">View health</button>
-      </div>
+      ${headerHtml}
       <div class="body-status-grid">
         <div class="body-status-stat">
           <span class="body-status-label">Last recorded</span>
@@ -1006,10 +1154,14 @@ async function buildBodyStatusCardHtml() {
           <span class="body-status-label">Today</span>
           <span class="body-status-value body-status-not-recorded">NOT RECORDED</span>
         </div>
+        <div class="body-status-stat">
+          <span class="body-status-label">30-day change</span>
+          <span class="body-status-value">${formatWeightChange(thirty.change)}</span>
+        </div>
       </div>
       ${recoveryHtml}
       ${flash}
-      <button type="button" class="btn-secondary btn-fds-inline" id="${logId}">${logLabel}</button>
+      <button type="button" class="btn-secondary btn-fds-inline" id="btn-log-weight">LOG WEIGHT</button>
     </div>
   `;
 }
@@ -1018,6 +1170,37 @@ function bindBodyStatusCard() {
   $('#btn-log-weight')?.addEventListener('click', () => openWeighInOverlay());
   $('#btn-edit-weight')?.addEventListener('click', () => openWeighInOverlay(true));
   $('#btn-view-body-comp')?.addEventListener('click', () => renderBodyComposition());
+}
+
+async function buildMissionBriefCardHtml(blueprint, exerciseCount, completed, active) {
+  const op = operationStyle(blueprint.operation);
+  const meta = OPERATION_META[blueprint.operation] || { role: '', contribution: '' };
+  const dayHeading = formatMissionDayHeading(new Date());
+  const duration = await getMissionDurationEstimate(blueprint.dayOfWeek, blueprint.operation, exerciseCount);
+  const objectiveLabel = exerciseCount === 1 ? 'objective' : 'objectives';
+
+  return `
+    <div class="mission-card mission-brief">
+      <span class="operation-badge" style="${op.style}">${escapeHtml(op.label.toUpperCase())}</span>
+      <p class="mission-brief-kicker">Today's Mission</p>
+      <h2 class="mission-brief-operation">${escapeHtml(op.label.toUpperCase())}</h2>
+      <p class="mission-brief-date">${escapeHtml(dayHeading)}</p>
+      <div class="mission-brief-block">
+        <p class="mission-brief-label">Role</p>
+        <p class="mission-brief-text">${escapeHtml(meta.role)}</p>
+      </div>
+      <div class="mission-brief-block">
+        <p class="mission-brief-label">Loadout</p>
+        <p class="mission-brief-text">${exerciseCount} ${objectiveLabel} · ${escapeHtml(duration.label)}</p>
+      </div>
+      <div class="mission-brief-block">
+        <p class="mission-brief-label">Campaign Contribution</p>
+        <p class="mission-brief-text">${escapeHtml(meta.contribution)}</p>
+      </div>
+      ${completed ? '<p class="status-complete">✓ Mission complete today</p>' : ''}
+      ${active && !completed ? '<p class="status-complete">Mission in progress</p>' : ''}
+    </div>
+  `;
 }
 
 async function openWeighInOverlay(isEdit = false, measurementId = null) {
@@ -1653,24 +1836,14 @@ function renderCentre() {
   const active = state.mission.status === MISSION_STATUS.ACTIVE;
   setHeader('Command Centre');
 
-  const op = operationStyle(state.blueprint.operation);
   const week = getCampaignWeek(state.campaign.startDate);
   const exerciseCount = state.blueprint.exercises.length;
 
-  const now = new Date();
   const today = getLocalDateString();
 
-  Promise.all([
-    getIntegrity(),
-    getCompletedMissionsThisWeek(),
-    getMonthHeatmapData(now.getFullYear(), now.getMonth()),
-    loadBodyMeasurements(),
-    buildWeekStrip(today)
-  ]).then(async ([integrity, weekly, heatmapData, , weekStrip]) => {
-    const stats = await getWeeklyStats(weekly);
-    const summary = formatIntegritySummary(integrity, stats);
-    const heatmapHtml = renderIntegrityHeatmapTile(escapeHtml(summary), heatmapData);
+  Promise.all([loadBodyMeasurements(), buildWeekStrip(today)]).then(async ([, weekStrip]) => {
     const bodyStatusHtml = await buildBodyStatusCardHtml();
+    const missionBriefHtml = await buildMissionBriefCardHtml(state.blueprint, exerciseCount, completed, active);
     const reviewDue = isReviewWeek(week);
     const reviewBadge = reviewDue
       ? '<span class="review-badge">Review available</span>'
@@ -1694,19 +1867,12 @@ function renderCentre() {
           ${buildBackupBannerHtml()}
           <p class="section-label">Active Campaign</p>
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
-          <p class="campaign-meta">${escapeHtml(state.campaign.season)} · Week ${week} of ${state.campaign.durationWeeks} ${reviewBadge}</p>
+          <p class="campaign-meta">Week ${week} of ${state.campaign.durationWeeks} ${reviewBadge}</p>
 
           ${weekStripHtml}
 
           <div class="centre-stack">
-            <div class="mission-card">
-              <span class="operation-badge" style="${op.style}">${op.label}</span>
-              <p class="mission-day">${escapeHtml(state.blueprint.dayName)}</p>
-              <p class="mission-focus">Today's Mission</p>
-              <p class="mission-stats">${exerciseCount} exercises · ${op.label} front</p>
-              ${completed ? '<p class="status-complete">✓ Mission complete today</p>' : ''}
-              ${active && !completed ? '<p class="status-complete">Mission in progress</p>' : ''}
-            </div>
+            ${missionBriefHtml}
 
             <div class="centre-actions">
               <button type="button" class="btn-primary" id="btn-begin" ${completed ? 'disabled' : ''}>
@@ -1719,8 +1885,6 @@ function renderCentre() {
             </div>
 
             ${bodyStatusHtml}
-
-            ${heatmapHtml}
 
             ${backupLineHtml}
           </div>
@@ -2229,11 +2393,79 @@ function renderBriefing() {
         state.mission = await startMission(state.mission);
         state.setLogs = [];
         state.checklistDone = new Set();
+        state.activeExerciseIndex = 0;
         renderActive();
       });
       $('#btn-back-centre').addEventListener('click', () => renderCentre());
     });
   });
+}
+
+async function renderActiveAtIndex(index) {
+  clearRestTimer();
+  clearExerciseTimer();
+
+  const exercises = getActiveExercises(state.mission);
+  if (!exercises.length || index < 0 || index >= exercises.length) {
+    renderComplete(false);
+    return;
+  }
+
+  const exercise = exercises[index];
+  if (isChecklistExercise(exercise)) {
+    await renderChecklistItem(exercise, exercises);
+    return;
+  }
+
+  state.activeExerciseIndex = index;
+  const unit = state.settings?.weightUnit || 'kg';
+  const rx = formatPrescriptionForDisplay(exercise, unit);
+  const prev = await getPreviousPerformance(exercise.id, state.mission.id);
+  const fields = prepareFields(exercise, prev, state.settings);
+  const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
+  const historyRows = formatExerciseHistoryRows(history, unit);
+  const hints = getProgressionHints(exercise, history);
+  const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
+  const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
+
+  beginExerciseTimer();
+
+  const bodyHtml = renderActiveExerciseBody(
+    exercise,
+    prev,
+    fields,
+    index,
+    exercises.length,
+    rx,
+    historyRows,
+    hints,
+    completedCount,
+    exercises,
+    state.setLogs,
+    state.mission
+  );
+
+  const screenBody = $('.screen-body');
+  const screenFooter = $('.screen-footer');
+  if (screenBody && screenFooter && state.screen === 'active') {
+    screenBody.innerHTML = bodyHtml;
+    screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
+    bindExerciseActions(exercise, exercises, index);
+    return;
+  }
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-body">
+        ${bodyHtml}
+      </div>
+      <div class="screen-footer">
+        ${renderActiveExerciseFooter(exercise, alreadyDone)}
+      </div>
+    </div>
+  `;
+
+  bindExerciseActions(exercise, exercises, index);
 }
 
 async function renderActive() {
@@ -2244,7 +2476,7 @@ async function renderActive() {
   state.mission = await getMission(state.mission.id);
   state.setLogs = await getSetLogsForMission(state.mission.id);
 
-  const exercises = state.mission.exercises.filter((e) => !state.mission.skippedExercises?.includes(e.id));
+  const exercises = getActiveExercises(state.mission);
   const isChecklistDay = exercises.every((e) => isChecklistExercise(e));
 
   if (isChecklistDay) {
@@ -2252,42 +2484,18 @@ async function renderActive() {
     return;
   }
 
-  const exercise = getCurrentExercise(state.mission);
-  if (!exercise) {
+  if (areRequiredExercisesDone(state.mission, state.setLogs)) {
     renderComplete(false);
     return;
   }
 
-  if (isChecklistExercise(exercise)) {
-    await renderChecklistItem(exercise, exercises);
-    return;
+  let index = state.activeExerciseIndex;
+  if (index == null || index < 0 || index >= exercises.length) {
+    index = Math.min(state.mission.currentExerciseIndex, exercises.length - 1);
   }
+  if (index < 0) index = 0;
 
-  const unit = state.settings?.weightUnit || 'kg';
-  const rx = formatPrescriptionForDisplay(exercise, unit);
-  const prev = await getPreviousPerformance(exercise.id, state.mission.id);
-  const fields = prepareFields(exercise, prev, state.settings);
-  const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
-  const historyRows = formatExerciseHistoryRows(history, unit);
-  const hints = getProgressionHints(exercise, history);
-
-  const exIndex = exercises.indexOf(exercise);
-  const totalExercises = exercises.length;
-
-  beginExerciseTimer();
-
-  screenRoot.innerHTML = `
-    <div class="screen">
-      <div class="screen-body">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints)}
-      </div>
-      <div class="screen-footer">
-        ${renderActiveExerciseFooter(exercise)}
-      </div>
-    </div>
-  `;
-
-  bindExerciseActions(exercise);
+  await renderActiveAtIndex(index);
 }
 
 function renderChecklistActive(exercises) {
@@ -2350,21 +2558,23 @@ async function renderChecklistItem(exercise, exercises) {
 
   const exIndex = exercises.indexOf(exercise);
   const totalExercises = exercises.length;
+  const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
+  const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
 
   beginExerciseTimer();
 
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints, completedCount, exercises, state.setLogs, state.mission)}
       </div>
       <div class="screen-footer">
-        ${renderActiveExerciseFooter(exercise)}
+        ${renderActiveExerciseFooter(exercise, alreadyDone)}
       </div>
     </div>
   `;
 
-  bindExerciseActions(exercise);
+  bindExerciseActions(exercise, exercises, exIndex);
 }
 
 async function renderComplete(alreadyDone = false) {
@@ -2634,6 +2844,7 @@ async function confirmAbortMission() {
   state.setLogs = [];
   state.checklistDone = new Set();
   state.fdsSelection = [];
+  state.activeExerciseIndex = null;
   renderCentre();
 }
 

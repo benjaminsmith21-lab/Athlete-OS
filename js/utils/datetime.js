@@ -46,3 +46,7 @@ export function formatDisplayDate(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 }
+
+export function formatMissionDayHeading(date = new Date()) {
+  return date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+}

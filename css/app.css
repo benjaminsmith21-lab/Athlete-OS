@@ -222,6 +222,53 @@ body {
   color: var(--text-muted);
 }
 
+.mission-brief-kicker {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mission-brief-operation {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+}
+
+.mission-brief-date {
+  margin: 0 0 14px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.mission-brief-block {
+  margin-bottom: 12px;
+}
+
+.mission-brief-block:last-of-type {
+  margin-bottom: 0;
+}
+
+.mission-brief-label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mission-brief-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
 .integrity-bar {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1056,15 +1103,16 @@ body {
 .exercise-note-link {
   border: none;
   background: none;
-  padding: 0;
-  font-size: 11px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--text-muted);
-  opacity: 0.7;
+  opacity: 0.85;
   cursor: pointer;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+  word-break: break-word;
 }
 
 .exercise-note-link.has-note {
@@ -1078,7 +1126,7 @@ body {
 
 .note-edit {
   width: 100%;
-  min-height: 96px;
+  min-height: 160px;
   padding: 12px;
   margin-bottom: 12px;
   border: 1px solid var(--border);
@@ -1087,7 +1135,7 @@ body {
   color: var(--text);
   font-family: var(--sans);
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.45;
   resize: vertical;
 }
 
@@ -1303,12 +1351,13 @@ body {
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+  align-items: start;
 }
 
 .body-status-stat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .body-status-label {
@@ -1316,6 +1365,8 @@ body {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  line-height: 1.35;
+  min-height: 2.7em;
 }
 
 .body-status-value {
@@ -1323,6 +1374,21 @@ body {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+  line-height: 1.2;
+}
+
+.body-status-value--tap {
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.body-status-value--tap:active {
+  opacity: 0.75;
 }
 
 .body-status-not-recorded {
@@ -2042,4 +2108,63 @@ body {
 .garmin-chart-svg {
   width: 100%;
   height: auto;
+}
+
+.exercise-swipe-stack {
+  margin-bottom: 8px;
+}
+
+.exercise-swipe-card {
+  touch-action: pan-y;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+  will-change: transform;
+}
+
+.exercise-swipe-card.is-dragging {
+  transition: none;
+}
+
+.exercise-swipe-card--snap {
+  transition: transform 0.18s ease;
+}
+
+.exercise-swipe-card--exit-left {
+  transform: translateX(-120%) rotate(-8deg);
+  opacity: 0;
+}
+
+.exercise-swipe-card--exit-right {
+  transform: translateX(120%) rotate(8deg);
+  opacity: 0;
+}
+
+.exercise-swipe-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.exercise-dots {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.exercise-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.exercise-dot--done {
+  background: #6b8f4e;
+}
+
+.exercise-dot--active {
+  box-shadow: 0 0 0 2px var(--accent);
+  background: var(--accent);
 }

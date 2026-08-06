@@ -54,7 +54,12 @@ function mergeCampaignBodyMetrics(campaign) {
 export async function getActiveCampaign() {
   await seedIfNeeded();
   const campaign = await get('campaigns', CAMPAIGN_ID);
-  return mergeCampaignBodyMetrics(campaign);
+  const merged = mergeCampaignBodyMetrics(campaign);
+  if (merged.name !== BLUEPRINT.name) {
+    merged.name = BLUEPRINT.name;
+    await put('campaigns', merged);
+  }
+  return merged;
 }
 
 export async function updateCampaignBodyMetrics(partial) {

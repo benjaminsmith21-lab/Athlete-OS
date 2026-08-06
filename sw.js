@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v19';
+const CACHE_NAME = 'athlete-os-v20';
 
 const ASSETS = [
   './',

@@ -39,6 +39,10 @@ def test_app_wires_review_screen():
     assert 'week-strip' in text
     assert 'garmin-metric-control' in text
     assert 'adj-run-duration' in text
+    assert 'buildMissionBriefCardHtml' in text
+    assert 'exercise-swipe-card' in text
+    assert 'Operation Forge' in (ROOT / 'js/seed/blueprint-v1.js').read_text(encoding='utf-8')
+    assert 'OPERATION_META' in (ROOT / 'js/seed/blueprint-v1.js').read_text(encoding='utf-8')
 
 
 if __name__ == '__main__':

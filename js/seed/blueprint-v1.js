@@ -10,6 +10,37 @@ export const OPERATIONS = {
   RESET: { label: 'Reset', color: '#7a8490' }
 };
 
+export const OPERATION_META = {
+  ENGINE: {
+    role: 'Build aerobic base without crushing recovery.',
+    contribution: 'Endurance · Zone 2 · Hangs'
+  },
+  FOUNDATION: {
+    role: 'Build durable full-body strength.',
+    contribution: 'Strength · Shoulder · Pull-up'
+  },
+  POWER: {
+    role: 'Develop force and single-leg stability.',
+    contribution: 'Strength · Power · Legs'
+  },
+  PULL: {
+    role: 'Strengthen back and hanging capacity.',
+    contribution: 'Pull · Shoulder · Pull-up'
+  },
+  SPEED: {
+    role: 'Develop running speed and leg turnover.',
+    contribution: 'Speed · Running · Engine'
+  },
+  ADVENTURE: {
+    role: 'Long run — stay easy, stay consistent.',
+    contribution: 'Endurance · Community · Engine'
+  },
+  RESET: {
+    role: 'Recover, move lightly, protect the week.',
+    contribution: 'Recovery · Mobility · Consistency'
+  }
+};
+
 export const FDS_FALLBACKS = [
   { id: 'fds-hangs', name: 'Ring hangs', type: 'timed', duration: 20, durationUnit: 's' },
   { id: 'fds-walk', name: '10-min walk', type: 'open', notes: '10 minutes' },
@@ -19,7 +50,7 @@ export const FDS_FALLBACKS = [
 
 export const BLUEPRINT = {
   id: CAMPAIGN_ID,
-  name: "Ben's Athlete Blueprint v1.0",
+  name: 'Operation Forge',
   season: 'Winter 2026 → Summer 2026',
   missionStatement:
     'Build a strong, lean endurance athlete with a fully functioning shoulder, first pull-up, faster half marathon and a physique you\'re proud of.',
