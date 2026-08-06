@@ -319,6 +319,14 @@ export function isStructuredExercise(exercise) {
   return ['weighted_reps', 'reps', 'timed'].includes(exercise.type);
 }
 
+export function isSimpleLogExercise(exercise) {
+  return exercise.type === 'distance' || exercise.type === 'optional';
+}
+
+export function isCardExercise(exercise) {
+  return isStructuredExercise(exercise) || exercise.type === 'carry';
+}
+
 export function isChecklistExercise(exercise) {
   return ['distance', 'carry', 'optional', 'open', 'note_only'].includes(exercise.type);
 }

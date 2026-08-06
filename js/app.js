@@ -23,6 +23,7 @@ import {
   areRequiredExercisesDone,
   getMissionDurationEstimate,
   isStructuredExercise,
+  isSimpleLogExercise,
   isChecklistExercise,
   formatPrescription,
   formatExerciseName,
@@ -902,9 +903,11 @@ function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
 
 function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
   state.activeExerciseFields = fields;
-  bindDials(screenRoot, exercise);
+  if (!isSimpleLogExercise(exercise)) {
+    bindDials(screenRoot, exercise);
+    bindExerciseSwipe(exercises, exerciseIndex);
+  }
   bindNoteButton();
-  bindExerciseSwipe(exercises, exerciseIndex);
   if (exercise.type === 'timed') {
     bindDurationTimerControls(exercise, fields);
   }
@@ -1045,6 +1048,30 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   });
 }
 
+function renderSimpleLogBody(exercise, fields, exIndex, totalExercises, completedCount, exercises, setLogs, mission, unit) {
+  state.exerciseNoteDraft = fields.notes || '';
+  const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
+  const rx = formatPrescriptionForDisplay(exercise, unit);
+
+  return `
+    <div class="active-exercise-layout">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <p class="progress-label">${completedCount} of ${totalExercises} complete · Exercise ${exIndex + 1}</p>
+      </div>
+
+      ${renderTimerStrip()}
+
+      <div class="simple-log-screen">
+        <h2 class="simple-log-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
+        ${rx ? `<p class="simple-log-rx">${escapeHtml(rx)}</p>` : ''}
+        <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+      </div>
+      ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
+    </div>
+  `;
+}
+
 function renderActiveExerciseBody(
   exercise,
   prev,
@@ -1156,6 +1183,13 @@ function collectActualFromForm(exercise) {
   if (distance != null) {
     actual.distance = distance;
     actual.distanceUnit = exercise.distanceUnit || 'km';
+  } else if (exercise.type === 'distance') {
+    const fields = state.activeExerciseFields;
+    const dist = fields?.distance ?? exercise.distance ?? exercise.distanceMin;
+    if (dist != null && dist !== '') {
+      actual.distance = Number(dist);
+      actual.distanceUnit = exercise.distanceUnit || 'km';
+    }
   }
   if (runDuration != null && showRunDurationField(exercise)) {
     actual.elapsedSeconds = Math.round(runDuration * 60);
@@ -2683,9 +2717,55 @@ async function renderActiveAtIndex(index) {
   }
 
   const exercise = exercises[index];
-  if (isChecklistExercise(exercise)) {
+  if (isSimpleLogExercise(exercise)) {
+    if (state.lastRenderedExerciseId !== exercise.id) {
+      clearDurationTimer();
+      state.lastRenderedExerciseId = exercise.id;
+    }
     clearExerciseTimer();
-    await renderChecklistItem(exercise, exercises);
+    state.activeExerciseIndex = index;
+    const unit = state.settings?.weightUnit || 'kg';
+    const prev = await getPreviousPerformance(exercise.id, state.mission.id);
+    const fields = prepareFields(exercise, prev, state.settings);
+    const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
+    const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
+
+    beginExerciseTimer();
+
+    const bodyHtml = renderSimpleLogBody(
+      exercise,
+      fields,
+      index,
+      exercises.length,
+      completedCount,
+      exercises,
+      state.setLogs,
+      state.mission,
+      unit
+    );
+
+    const screenBody = $('.screen-body');
+    const screenFooter = $('.screen-footer');
+    if (screenBody && screenFooter && state.screen === 'active') {
+      screenBody.classList.add('screen-body--active');
+      screenBody.innerHTML = bodyHtml;
+      screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
+      bindExerciseActions(exercise, exercises, index, fields);
+      return;
+    }
+
+    screenRoot.innerHTML = `
+      <div class="screen">
+        <div class="screen-body screen-body--active">
+          ${bodyHtml}
+        </div>
+        <div class="screen-footer">
+          ${renderActiveExerciseFooter(exercise, alreadyDone)}
+        </div>
+      </div>
+    `;
+
+    bindExerciseActions(exercise, exercises, index, fields);
     return;
   }
 
@@ -2828,35 +2908,6 @@ function renderChecklistActive(exercises) {
   });
 
   $('#btn-finish-checklist').addEventListener('click', () => afterExerciseComplete(true));
-}
-
-async function renderChecklistItem(exercise, exercises) {
-  const unit = state.settings?.weightUnit || 'kg';
-  const prev = await getPreviousPerformance(exercise.id, state.mission.id);
-  const fields = prepareFields(exercise, prev, state.settings);
-  const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
-  const historyRows = formatExerciseHistoryRows(history, unit);
-  const hints = getProgressionHints(exercise, history);
-
-  const exIndex = exercises.indexOf(exercise);
-  const totalExercises = exercises.length;
-  const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
-  const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
-
-  beginExerciseTimer();
-
-  screenRoot.innerHTML = `
-    <div class="screen">
-      <div class="screen-body screen-body--active">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, '', historyRows, hints, completedCount, exercises, state.setLogs, state.mission)}
-      </div>
-      <div class="screen-footer">
-        ${renderActiveExerciseFooter(exercise, alreadyDone)}
-      </div>
-    </div>
-  `;
-
-  bindExerciseActions(exercise, exercises, exIndex, fields);
 }
 
 async function renderComplete(alreadyDone = false) {
