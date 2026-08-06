@@ -1714,7 +1714,7 @@ function renderCentre() {
               </button>
               ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
               ${active && !completed ? '<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">Abort Mission</button>' : ''}
-              ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS — Do Something</button>' : ''}
+              ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS Workout</button>' : ''}
               <button type="button" class="btn-secondary" id="btn-campaign-review">Campaign Review</button>
             </div>
 
