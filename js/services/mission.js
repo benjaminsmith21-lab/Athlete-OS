@@ -131,9 +131,17 @@ export function countCompletedExercises(exercises, setLogs, mission) {
 }
 
 export function areRequiredExercisesDone(mission, setLogs) {
-  const exercises = getActiveExercises(mission);
-  const required = exercises.filter((e) => e.type !== 'optional' && e.type !== 'note_only');
-  return required.every((e) => isExerciseDone(e, setLogs, mission));
+  return areFlowExercisesDone(mission, setLogs);
+}
+
+export function getFlowExercises(mission) {
+  return getActiveExercises(mission).filter(isCardExercise);
+}
+
+export function areFlowExercisesDone(mission, setLogs) {
+  const flow = getFlowExercises(mission);
+  if (!flow.length) return true;
+  return flow.every((e) => isExerciseDone(e, setLogs, mission));
 }
 
 export async function getMissionDurationEstimate(dayOfWeek, operation, exerciseCount) {
@@ -319,10 +327,6 @@ export function isStructuredExercise(exercise) {
   return ['weighted_reps', 'reps', 'timed'].includes(exercise.type);
 }
 
-export function isSimpleLogExercise(exercise) {
-  return exercise.type === 'distance' || exercise.type === 'optional';
-}
-
 export function isCardExercise(exercise) {
   return isStructuredExercise(exercise) || exercise.type === 'carry';
 }
@@ -386,11 +390,17 @@ export function computeSuggestedRating(mission, setLogs) {
   if (mission.isFds) return MISSION_RATINGS.MINIMUM;
 
   const exercises = mission.exercises.filter((e) => e.type !== 'note_only');
-  const required = exercises.filter((e) => e.type !== 'optional');
+  const required = exercises.filter((e) => e.type !== 'optional' && e.type !== 'distance');
   const completedExerciseIds = new Set(setLogs.map((l) => l.exerciseId));
 
   const requiredDone = required.every((e) => completedExerciseIds.has(e.id));
-  const allDone = exercises.every((e) => e.type === 'optional' || completedExerciseIds.has(e.id) || mission.skippedExercises.includes(e.id));
+  const allDone = exercises.every(
+    (e) =>
+      e.type === 'optional' ||
+      e.type === 'distance' ||
+      completedExerciseIds.has(e.id) ||
+      mission.skippedExercises?.includes(e.id)
+  );
 
   if (allDone && requiredDone) {
     const optionalSkipped = exercises.some((e) => e.type === 'optional' && !completedExerciseIds.has(e.id));

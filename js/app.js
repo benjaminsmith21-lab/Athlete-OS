@@ -18,13 +18,12 @@ import {
   advanceMissionPointer,
   getCurrentExercise,
   getActiveExercises,
+  getFlowExercises,
   isExerciseDone,
   countCompletedExercises,
-  areRequiredExercisesDone,
+  areFlowExercisesDone,
   getMissionDurationEstimate,
   isStructuredExercise,
-  isSimpleLogExercise,
-  isChecklistExercise,
   formatPrescription,
   formatExerciseName,
   getExerciseFieldDefaults,
@@ -901,12 +900,31 @@ function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
   `;
 }
 
-function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
-  state.activeExerciseFields = fields;
-  if (!isSimpleLogExercise(exercise)) {
-    bindDials(screenRoot, exercise);
-    bindExerciseSwipe(exercises, exerciseIndex);
+function resolveFlowIndex(flowExercises, setLogs, mission, preferredIndex) {
+  if (!flowExercises.length) return 0;
+
+  const firstIncomplete = flowExercises.findIndex((e) => !isExerciseDone(e, setLogs, mission));
+  if (firstIncomplete < 0) return flowExercises.length - 1;
+
+  if (preferredIndex == null || preferredIndex < 0 || preferredIndex >= flowExercises.length) {
+    return firstIncomplete;
   }
+
+  if (!isExerciseDone(flowExercises[preferredIndex], setLogs, mission)) {
+    return preferredIndex;
+  }
+
+  for (let i = preferredIndex + 1; i < flowExercises.length; i++) {
+    if (!isExerciseDone(flowExercises[i], setLogs, mission)) return i;
+  }
+
+  return firstIncomplete;
+}
+
+function bindExerciseActions(exercise, flowExercises, exerciseIndex, fields) {
+  state.activeExerciseFields = fields;
+  bindDials(screenRoot, exercise);
+  bindExerciseSwipe(flowExercises, exerciseIndex);
   bindNoteButton();
   if (exercise.type === 'timed') {
     bindDurationTimerControls(exercise, fields);
@@ -922,7 +940,7 @@ function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
     state.activeExerciseIndex = state.mission.currentExerciseIndex;
     state.mission = await saveMission(state.mission);
 
-    if (areRequiredExercisesDone(state.mission, state.setLogs)) {
+    if (areFlowExercisesDone(state.mission, state.setLogs)) {
       await afterExerciseComplete(true);
       return;
     }
@@ -945,18 +963,18 @@ function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
     state.mission = await saveMission(state.mission);
     state.setLogs = await getSetLogsForMission(state.mission.id);
 
-    if (areRequiredExercisesDone(state.mission, state.setLogs)) {
+    if (areFlowExercisesDone(state.mission, state.setLogs)) {
       await afterExerciseComplete(true);
       return;
     }
 
-    const nextIndex = Math.min(exerciseIndex + 1, exercises.length - 1);
+    const nextIndex = Math.min(exerciseIndex + 1, flowExercises.length - 1);
     renderActiveAtIndex(nextIndex);
   });
 }
 
-async function navigateActiveExercise(index, exercises) {
-  if (index < 0 || index >= exercises.length) return;
+async function navigateActiveExercise(index, flowExercises) {
+  if (index < 0 || index >= flowExercises.length) return;
   clearDurationTimer();
   state.activeExerciseIndex = index;
   state.mission.currentExerciseIndex = index;
@@ -964,7 +982,7 @@ async function navigateActiveExercise(index, exercises) {
   await renderActiveAtIndex(index);
 }
 
-function bindExerciseSwipe(exercises, exerciseIndex) {
+function bindExerciseSwipe(flowExercises, exerciseIndex) {
   const card = $('#exercise-swipe-card');
   if (!card) return;
 
@@ -983,14 +1001,14 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
     dragging = false;
     card.classList.remove('is-dragging');
 
-    if (currentX <= -threshold && exerciseIndex < exercises.length - 1) {
+    if (currentX <= -threshold && exerciseIndex < flowExercises.length - 1) {
       card.classList.add('exercise-swipe-card--exit-left');
-      setTimeout(() => navigateActiveExercise(exerciseIndex + 1, exercises), 140);
+      setTimeout(() => navigateActiveExercise(exerciseIndex + 1, flowExercises), 140);
       return;
     }
     if (currentX >= threshold && exerciseIndex > 0) {
       card.classList.add('exercise-swipe-card--exit-right');
-      setTimeout(() => navigateActiveExercise(exerciseIndex - 1, exercises), 140);
+      setTimeout(() => navigateActiveExercise(exerciseIndex - 1, flowExercises), 140);
       return;
     }
     resetCard();
@@ -1048,28 +1066,25 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   });
 }
 
-function renderSimpleLogBody(exercise, fields, exIndex, totalExercises, completedCount, exercises, setLogs, mission, unit) {
-  state.exerciseNoteDraft = fields.notes || '';
-  const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
-  const rx = formatPrescriptionForDisplay(exercise, unit);
+function renderFlowCompleteScreen() {
+  clearRestTimer();
+  clearExerciseTimer();
+  state.screen = 'active';
+  setHeader('Active Mission');
 
-  return `
-    <div class="active-exercise-layout">
-      <div class="progress-bar-wrap">
-        <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
-        <p class="progress-label">${completedCount} of ${totalExercises} complete · Exercise ${exIndex + 1}</p>
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="flow-complete-screen">
+        <p class="flow-complete-label">Today's mission</p>
+        <p class="flow-complete-text">No gym exercises — you're done when your run is complete.</p>
       </div>
-
-      ${renderTimerStrip()}
-
-      <div class="simple-log-screen">
-        <h2 class="simple-log-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-        ${rx ? `<p class="simple-log-rx">${escapeHtml(rx)}</p>` : ''}
-        <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+      <div class="screen-footer">
+        <button type="button" class="btn-primary" id="btn-finish-flow-mission">Finish Mission</button>
       </div>
-      ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
     </div>
   `;
+
+  $('#btn-finish-flow-mission').addEventListener('click', () => afterExerciseComplete(true));
 }
 
 function renderActiveExerciseBody(
@@ -1183,13 +1198,6 @@ function collectActualFromForm(exercise) {
   if (distance != null) {
     actual.distance = distance;
     actual.distanceUnit = exercise.distanceUnit || 'km';
-  } else if (exercise.type === 'distance') {
-    const fields = state.activeExerciseFields;
-    const dist = fields?.distance ?? exercise.distance ?? exercise.distanceMin;
-    if (dist != null && dist !== '') {
-      actual.distance = Number(dist);
-      actual.distanceUnit = exercise.distanceUnit || 'km';
-    }
   }
   if (runDuration != null && showRunDurationField(exercise)) {
     actual.elapsedSeconds = Math.round(runDuration * 60);
@@ -1236,9 +1244,9 @@ async function renderRestTimer(totalSeconds, onDone) {
 
   const settings = state.settings || (await getSettings());
   const unit = settings.weightUnit || 'kg';
-  const exercises = state.mission.exercises.filter((e) => !state.mission.skippedExercises?.includes(e.id));
+  const flowExercises = getFlowExercises(state.mission);
   const nextIndex = state.mission.currentExerciseIndex;
-  const nextExercise = settings.showNextExerciseOnRest ? exercises[nextIndex] : null;
+  const nextExercise = settings.showNextExerciseOnRest ? flowExercises[nextIndex] : null;
 
   let nextPreviewHtml = '';
   if (nextExercise) {
@@ -2710,64 +2718,19 @@ async function renderActiveAtIndex(index) {
   state.screen = 'active';
   setHeader('Active Mission');
 
-  const exercises = getActiveExercises(state.mission);
-  if (!exercises.length || index < 0 || index >= exercises.length) {
+  const flowExercises = getFlowExercises(state.mission);
+  if (!flowExercises.length) {
+    renderFlowCompleteScreen();
+    return;
+  }
+
+  const flowIndex = resolveFlowIndex(flowExercises, state.setLogs, state.mission, index);
+  if (flowIndex < 0 || flowIndex >= flowExercises.length) {
     renderComplete(false);
     return;
   }
 
-  const exercise = exercises[index];
-  if (isSimpleLogExercise(exercise)) {
-    if (state.lastRenderedExerciseId !== exercise.id) {
-      clearDurationTimer();
-      state.lastRenderedExerciseId = exercise.id;
-    }
-    clearExerciseTimer();
-    state.activeExerciseIndex = index;
-    const unit = state.settings?.weightUnit || 'kg';
-    const prev = await getPreviousPerformance(exercise.id, state.mission.id);
-    const fields = prepareFields(exercise, prev, state.settings);
-    const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
-    const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
-
-    beginExerciseTimer();
-
-    const bodyHtml = renderSimpleLogBody(
-      exercise,
-      fields,
-      index,
-      exercises.length,
-      completedCount,
-      exercises,
-      state.setLogs,
-      state.mission,
-      unit
-    );
-
-    const screenBody = $('.screen-body');
-    const screenFooter = $('.screen-footer');
-    if (screenBody && screenFooter && state.screen === 'active') {
-      screenBody.classList.add('screen-body--active');
-      screenBody.innerHTML = bodyHtml;
-      screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
-      bindExerciseActions(exercise, exercises, index, fields);
-      return;
-    }
-
-    screenRoot.innerHTML = `
-      <div class="screen">
-        <div class="screen-body screen-body--active">
-          ${bodyHtml}
-        </div>
-        <div class="screen-footer">
-          ${renderActiveExerciseFooter(exercise, alreadyDone)}
-        </div>
-      </div>
-    `;
-
-    bindExerciseActions(exercise, exercises, index, fields);
-    return;
-  }
+  const exercise = flowExercises[flowIndex];
 
   if (state.lastRenderedExerciseId !== exercise.id) {
     clearDurationTimer();
@@ -2778,14 +2741,15 @@ async function renderActiveAtIndex(index) {
     exerciseTimerInterval = null;
   }
 
-  state.activeExerciseIndex = index;
+  state.activeExerciseIndex = flowIndex;
+  state.mission.currentExerciseIndex = flowIndex;
   const unit = state.settings?.weightUnit || 'kg';
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
   const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
   const historyRows = formatExerciseHistoryRows(history, unit);
   const hints = getProgressionHints(exercise, history);
-  const completedCount = countCompletedExercises(exercises, state.setLogs, state.mission);
+  const completedCount = countCompletedExercises(flowExercises, state.setLogs, state.mission);
   const alreadyDone = isExerciseDone(exercise, state.setLogs, state.mission);
 
   beginExerciseTimer();
@@ -2794,13 +2758,13 @@ async function renderActiveAtIndex(index) {
     exercise,
     prev,
     fields,
-    index,
-    exercises.length,
+    flowIndex,
+    flowExercises.length,
     '',
     historyRows,
     hints,
     completedCount,
-    exercises,
+    flowExercises,
     state.setLogs,
     state.mission
   );
@@ -2811,7 +2775,7 @@ async function renderActiveAtIndex(index) {
     screenBody.classList.add('screen-body--active');
     screenBody.innerHTML = bodyHtml;
     screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
-    bindExerciseActions(exercise, exercises, index, fields);
+    bindExerciseActions(exercise, flowExercises, flowIndex, fields);
     return;
   }
 
@@ -2826,7 +2790,7 @@ async function renderActiveAtIndex(index) {
     </div>
   `;
 
-  bindExerciseActions(exercise, exercises, index, fields);
+  bindExerciseActions(exercise, flowExercises, flowIndex, fields);
 }
 
 async function renderActive() {
@@ -2840,23 +2804,29 @@ async function renderActive() {
   state.setLogs = await getSetLogsForMission(state.mission.id);
 
   const exercises = getActiveExercises(state.mission);
-  const isChecklistDay = exercises.every((e) => isChecklistExercise(e));
+  const isChecklistDay = exercises.length > 0 && exercises.every((e) => e.type === 'open' || e.type === 'note_only');
 
   if (isChecklistDay) {
     renderChecklistActive(exercises);
     return;
   }
 
-  if (areRequiredExercisesDone(state.mission, state.setLogs)) {
+  const flowExercises = getFlowExercises(state.mission);
+  if (!flowExercises.length) {
+    renderFlowCompleteScreen();
+    return;
+  }
+
+  if (areFlowExercisesDone(state.mission, state.setLogs)) {
     renderComplete(false);
     return;
   }
 
-  let index = state.activeExerciseIndex;
-  if (index == null || index < 0 || index >= exercises.length) {
-    index = Math.min(state.mission.currentExerciseIndex, exercises.length - 1);
-  }
-  if (index < 0) index = 0;
+  const preferredIndex =
+    state.activeExerciseIndex != null && state.activeExerciseIndex >= 0
+      ? state.activeExerciseIndex
+      : state.mission.currentExerciseIndex;
+  const index = resolveFlowIndex(flowExercises, state.setLogs, state.mission, preferredIndex);
 
   await renderActiveAtIndex(index);
 }
