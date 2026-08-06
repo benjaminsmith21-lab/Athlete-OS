@@ -159,7 +159,7 @@ const state = {
   durationTimerTotal: 0,
   durationTimerTargetSeconds: null,
   durationTimerSoundPlayed: false,
-  durationEditMode: false
+  activeExerciseFields: null
 };
 
 let restTimerInterval = null;
@@ -170,9 +170,7 @@ let restCompleteAudio = null;
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
 const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
 const DURATION_PREP_SECONDS = 5;
-const DURATION_EDIT_MIN = 5;
-const DURATION_EDIT_MAX = 300;
-const DURATION_EDIT_STEP = 5;
+const BODYWEIGHT_DIAL_LABEL = 'Body weight';
 
 const WORKOUT_COMPLETE_SOUNDS = [
   './assets/audio/workout%20complete/mission-accomplished.mp3',
@@ -317,7 +315,6 @@ function resetDurationTimer() {
   state.durationTimerTotal = 0;
   state.durationTimerTargetSeconds = null;
   state.durationTimerSoundPlayed = false;
-  state.durationEditMode = false;
 }
 
 function clearDurationTimer() {
@@ -398,86 +395,6 @@ function formatPrescriptionForDisplay(exercise, weightUnit) {
   return formatPrescription(exercise);
 }
 
-function formatLivePrescription(exercise, fields, unit) {
-  const sets = fields.sets;
-  const reps = fields.reps;
-  const weight = fields.weight;
-  const weightLabel = fields.weightLabel;
-
-  if (exercise.type === 'timed') {
-    const duration = fields.duration ?? getTimedExerciseSeconds(exercise, fields);
-    const durUnit = exercise.durationUnit || 's';
-    if (sets) return `${duration}${durUnit} × ${sets} sets`;
-    return `${duration}${durUnit}`;
-  }
-
-  if (
-    weightLabel === 'bodyweight' ||
-    (isBodyweightRepsExercise(exercise) && (weight == null || weight === '' || Number(weight) <= 0))
-  ) {
-    if (reps && sets) return `BW × ${reps} × ${sets} sets`;
-    if (reps) return `BW × ${reps}`;
-  }
-
-  if (weight != null && weight !== '' && Number(weight) > 0) {
-    const w = Number(weight);
-    if (reps && sets) return `${w}${unit} × ${reps} × ${sets} sets`;
-    if (reps) return `${w}${unit} × ${reps}`;
-  }
-
-  if (reps && sets) return `${reps} × ${sets} sets`;
-  if (reps) return `${reps} reps`;
-
-  if (fields.distance != null && fields.distance !== '') {
-    return `${fields.distance}${exercise.distanceUnit || 'km'}`;
-  }
-
-  if (exercise.type === 'carry' && exercise.weightMin != null) {
-    const wMin = kgToUnit(exercise.weightMin, unit);
-    const wMax = kgToUnit(exercise.weightMax, unit);
-    return `${wMin}–${wMax}${unit}`;
-  }
-
-  return formatPrescriptionForDisplay(exercise, unit);
-}
-
-function readFieldsFromDials(exercise) {
-  const unit = state.settings?.weightUnit || 'kg';
-  const fields = {};
-  const sets = getDialValue('adj-sets');
-  const reps = getDialValue('adj-reps');
-  const weight = getDialValue('adj-weight');
-  const distance = getDialValue('adj-distance');
-
-  if (sets != null) fields.sets = Math.round(sets);
-  if (reps != null) fields.reps = Math.round(reps);
-
-  const weightEl = $('#adj-weight');
-  if (weightEl) {
-    const t = weightEl.textContent.trim();
-    if (t === 'BW') fields.weightLabel = 'bodyweight';
-    else if (weight != null && weight > 0) {
-      fields.weight = weight;
-      fields.weightUnit = unit;
-    }
-  }
-
-  if (exercise.type === 'timed') {
-    fields.duration = getTimedExerciseSeconds(exercise, null);
-  }
-
-  if (distance != null) fields.distance = distance;
-
-  return fields;
-}
-
-function updateExerciseRxDisplay(exercise) {
-  const el = $('#exercise-rx-display');
-  if (!el || !exercise) return;
-  const unit = state.settings?.weightUnit || 'kg';
-  el.textContent = formatLivePrescription(exercise, readFieldsFromDials(exercise), unit);
-}
-
 function prepareFields(exercise, prev, settings) {
   const fields = getExerciseFieldDefaults(exercise, prev);
   const unit = settings.weightUnit;
@@ -552,20 +469,35 @@ function renderWeekStripHtml(days) {
   `;
 }
 
+function isBodyweightDialValue(text) {
+  const t = text.trim();
+  return t === 'BW' || t === BODYWEIGHT_DIAL_LABEL;
+}
+
 function renderDialRow(label, id, value, opts = {}) {
   const { min = 0, max = 999, step = 1, bw = false } = opts;
   const numVal = value === '' || value == null ? 0 : Number(value);
-  const displayVal = bw && numVal <= 0 ? 'BW' : (Number.isInteger(step) ? numVal : numVal);
+  const displayVal =
+    bw && numVal <= 0 ? BODYWEIGHT_DIAL_LABEL : Number.isInteger(step) ? numVal : numVal;
 
   return `
     <div class="adjust-row">
       <label>${label}</label>
       <div class="dial" data-id="${id}" data-min="${min}" data-max="${max}" data-step="${step}" data-bw="${bw ? '1' : '0'}">
         <button type="button" class="dial-btn dial-minus" aria-label="Decrease ${label}">−</button>
-        <span class="dial-value" id="${id}">${displayVal === 'BW' ? 'BW' : displayVal}</span>
+        <span class="dial-value" id="${id}">${displayVal === BODYWEIGHT_DIAL_LABEL ? BODYWEIGHT_DIAL_LABEL : displayVal}</span>
         <button type="button" class="dial-btn dial-plus" aria-label="Increase ${label}">+</button>
       </div>
     </div>`;
+}
+
+function syncTimedDurationFromDial(exercise) {
+  if (!exercise || exercise.type !== 'timed' || state.durationTimerPhase !== 'idle') return;
+  const seconds = getDialValue('adj-duration');
+  if (seconds != null && seconds > 0) {
+    state.durationTimerTargetSeconds = Math.round(seconds);
+    refreshTimedCountdownView(exercise, state.activeExerciseFields);
+  }
 }
 
 function bindDials(container, exercise = null) {
@@ -582,20 +514,20 @@ function bindDials(container, exercise = null) {
 
     function getVal() {
       const t = valueEl.textContent.trim();
-      if (t === 'BW') return 0;
+      if (isBodyweightDialValue(t)) return 0;
       return parseFloat(t) || 0;
     }
 
     function setVal(v) {
       if (isBw && v <= 0) {
-        valueEl.textContent = 'BW';
+        valueEl.textContent = BODYWEIGHT_DIAL_LABEL;
       } else if (Number.isInteger(step)) {
         valueEl.textContent = Math.round(v);
       } else {
         valueEl.textContent = String(Math.round(v * 2) / 2);
       }
-      if (exercise && state.screen === 'active') {
-        updateExerciseRxDisplay(exercise);
+      if (dial.dataset.id === 'adj-duration') {
+        syncTimedDurationFromDial(exercise);
       }
     }
 
@@ -639,7 +571,7 @@ function usesStandardRepDials(exercise) {
 }
 
 function showDurationField(exercise) {
-  return false;
+  return exercise.type === 'timed';
 }
 
 function showDistanceField(exercise) {
@@ -656,18 +588,24 @@ function buildExerciseControls(exercise, fields) {
 
   let html = '';
 
+  if (showDurationField(exercise)) {
+    html += renderDialRow(`Duration (${exercise.durationUnit || 's'})`, 'adj-duration', fields.duration, {
+      min: 5,
+      max: 300,
+      step: 5
+    });
+  }
+
   if (usesStandardRepDials(exercise)) {
     html += renderDialRow('Sets', 'adj-sets', fields.sets, { min: 1, max: 20, step: 1 });
     html += renderDialRow('Reps', 'adj-reps', fields.reps, { min: 1, max: 50, step: 1 });
-    if (!isBodyweightRepsExercise(exercise)) {
-      const isBw = fields.weightLabel === 'bodyweight' || !exercise.weight;
-      html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
-        min: 0,
-        max: unit === 'lbs' ? 440 : 200,
-        step: wStep,
-        bw: isBw
-      });
-    }
+    const allowBw = isBodyweightRepsExercise(exercise) || fields.weightLabel === 'bodyweight';
+    html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
+      min: 0,
+      max: unit === 'lbs' ? 440 : 200,
+      step: wStep,
+      bw: allowBw
+    });
   } else {
     const isBw = fields.weightLabel === 'bodyweight' || (!exercise.weight && showWeightField(exercise));
 
@@ -723,19 +661,13 @@ function formatDurationClock(totalSeconds) {
 }
 
 function getTimedExerciseSeconds(exercise, fields) {
+  const fromDial = getDialValue('adj-duration');
+  if (fromDial != null && fromDial > 0) return Math.round(fromDial);
   if (state.durationTimerTargetSeconds != null) return state.durationTimerTargetSeconds;
   const fromFields = fields?.duration;
   if (fromFields != null && fromFields !== '') return Math.round(Number(fromFields));
   if (exercise.duration != null) return Math.round(exercise.duration);
   return 20;
-}
-
-function adjustTimedDuration(delta, exercise, fields) {
-  const current = getTimedExerciseSeconds(exercise, fields);
-  const next = Math.max(DURATION_EDIT_MIN, Math.min(DURATION_EDIT_MAX, current + delta));
-  state.durationTimerTargetSeconds = next;
-  refreshTimedCountdownView(exercise, fields);
-  updateExerciseRxDisplay(exercise);
 }
 
 function renderTimedCountdownBlock(exercise, fields) {
@@ -746,10 +678,7 @@ function renderTimedCountdownBlock(exercise, fields) {
   const progress =
     phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
 
-  const canEdit = phase === 'idle';
-  const editMode = state.durationEditMode && canEdit;
-
-  let phaseLabel = 'Tap to set duration';
+  let phaseLabel = 'Ready when you are';
   let displayTime = formatDurationClock(targetSeconds);
   if (phase === 'prep') {
     phaseLabel = 'Get ready…';
@@ -760,46 +689,17 @@ function renderTimedCountdownBlock(exercise, fields) {
   } else if (phase === 'done') {
     phaseLabel = "Time's up";
     displayTime = '0:00';
-  } else if (editMode) {
-    phaseLabel = 'Adjust duration';
-  } else if (canEdit) {
-    phaseLabel = 'Tap to set duration';
-  } else {
-    phaseLabel = 'Ready when you are';
   }
 
   const startDisabled = phase === 'prep' || phase === 'running' ? 'disabled' : '';
   const startLabel = phase === 'done' ? 'Restart Timer' : 'Start Timer';
 
-  const ringClasses = ['timed-countdown-ring'];
-  if (canEdit && !editMode) ringClasses.push('timed-countdown-ring--editable');
-
-  let ringInner = '';
-  if (editMode) {
-    ringInner = `
-      <div class="timed-countdown-edit">
-        <button type="button" class="dial-btn dial-minus" id="btn-duration-minus" aria-label="Decrease duration">−</button>
-        <span class="timed-countdown-time">${formatDurationClock(targetSeconds)}</span>
-        <button type="button" class="dial-btn dial-plus" id="btn-duration-plus" aria-label="Increase duration">+</button>
-      </div>
-    `;
-  } else {
-    ringInner = `<span class="timed-countdown-time">${displayTime}</span>`;
-  }
-
-  const ringAttrs = canEdit && !editMode
-    ? 'role="button" tabindex="0" id="btn-duration-ring" aria-label="Set hang duration"'
-    : canEdit && editMode
-      ? 'id="btn-duration-ring"'
-      : '';
-
   return `
     <div class="timed-countdown" id="timed-countdown">
-      <div class="${ringClasses.join(' ')}" style="--timed-progress: ${progress}%" ${ringAttrs}>
-        ${ringInner}
+      <div class="timed-countdown-ring" style="--timed-progress: ${progress}%">
+        <span class="timed-countdown-time">${displayTime}</span>
       </div>
       <p class="timed-countdown-label">${phaseLabel}</p>
-      ${editMode ? '<button type="button" class="btn-ghost timed-countdown-done" id="btn-duration-done">Done</button>' : ''}
       <button type="button" class="btn-secondary timed-countdown-start" id="btn-start-duration-timer" ${startDisabled}>
         ${startLabel}
       </button>
@@ -855,7 +755,6 @@ function startDurationTimerRunning(exercise, fields) {
 }
 
 function startDurationTimerPrep(exercise, fields) {
-  state.durationEditMode = false;
   if (durationTimerInterval) {
     clearInterval(durationTimerInterval);
     durationTimerInterval = null;
@@ -886,37 +785,6 @@ function bindDurationTimerControls(exercise, fields) {
   $('#btn-start-duration-timer')?.addEventListener('click', () => {
     if (state.durationTimerPhase === 'prep' || state.durationTimerPhase === 'running') return;
     startDurationTimerPrep(exercise, fields);
-  });
-
-  $('#btn-duration-ring')?.addEventListener('click', (e) => {
-    if (state.durationTimerPhase !== 'idle') return;
-    if (e.target.closest('#btn-duration-minus, #btn-duration-plus')) return;
-    state.durationEditMode = !state.durationEditMode;
-    refreshTimedCountdownView(exercise, fields);
-  });
-
-  $('#btn-duration-ring')?.addEventListener('keydown', (e) => {
-    if (state.durationTimerPhase !== 'idle' || state.durationEditMode) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      state.durationEditMode = true;
-      refreshTimedCountdownView(exercise, fields);
-    }
-  });
-
-  $('#btn-duration-minus')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    adjustTimedDuration(-DURATION_EDIT_STEP, exercise, fields);
-  });
-
-  $('#btn-duration-plus')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    adjustTimedDuration(DURATION_EDIT_STEP, exercise, fields);
-  });
-
-  $('#btn-duration-done')?.addEventListener('click', () => {
-    state.durationEditMode = false;
-    refreshTimedCountdownView(exercise, fields);
   });
 }
 
@@ -1027,6 +895,7 @@ function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
 }
 
 function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
+  state.activeExerciseFields = fields;
   bindDials(screenRoot, exercise);
   bindNoteButton();
   bindExerciseSwipe(exercises, exerciseIndex);
@@ -1200,7 +1069,6 @@ function renderActiveExerciseBody(
           <div class="exercise-card">
             <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
             <div class="exercise-focus">
-              <p class="exercise-rx" id="exercise-rx-display">${escapeHtml(rx)}</p>
               ${exercise.type === 'timed' ? renderTimedCountdownBlock(exercise, fields) : ''}
             </div>
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
@@ -1226,7 +1094,7 @@ function getDialValue(id) {
   const el = $(`#${id}`);
   if (!el) return null;
   const t = el.textContent.trim();
-  if (t === 'BW') return 0;
+  if (isBodyweightDialValue(t)) return 0;
   const n = parseFloat(t);
   return Number.isNaN(n) ? null : n;
 }
@@ -1241,14 +1109,18 @@ function collectActualFromForm(exercise) {
   const duration = getDialValue('adj-duration');
   const distance = getDialValue('adj-distance');
   const runDuration = getDialValue('adj-run-duration');
+  const weightEl = $('#adj-weight');
 
   if (sets != null) actual.sets = Math.round(sets);
   if (reps != null) actual.reps = Math.round(reps);
-  if (weight != null && weight > 0) {
-    actual.weight = weight;
-    actual.weightUnit = unit;
-  } else if (usesStandardRepDials(exercise) && isBodyweightRepsExercise(exercise)) {
-    actual.weightLabel = 'bodyweight';
+  if (weightEl) {
+    const weightText = weightEl.textContent.trim();
+    if (isBodyweightDialValue(weightText)) {
+      actual.weightLabel = 'bodyweight';
+    } else if (weight != null && weight > 0) {
+      actual.weight = weight;
+      actual.weightUnit = unit;
+    }
   } else if (showWeightField(exercise) && !exercise.weight) {
     actual.weightLabel = 'bodyweight';
   }
@@ -1256,7 +1128,7 @@ function collectActualFromForm(exercise) {
     actual.duration = Math.round(duration);
     actual.durationUnit = exercise.durationUnit || 's';
   } else if (exercise.type === 'timed') {
-    const timedSeconds = state.durationTimerTargetSeconds ?? getTimedExerciseSeconds(exercise, null);
+    const timedSeconds = getTimedExerciseSeconds(exercise, state.activeExerciseFields);
     actual.duration = timedSeconds;
     actual.durationUnit = exercise.durationUnit || 's';
   }
@@ -2803,7 +2675,6 @@ async function renderActiveAtIndex(index) {
   const unit = state.settings?.weightUnit || 'kg';
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
-  const rx = formatLivePrescription(exercise, fields, unit);
   const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
   const historyRows = formatExerciseHistoryRows(history, unit);
   const hints = getProgressionHints(exercise, history);
@@ -2818,7 +2689,7 @@ async function renderActiveAtIndex(index) {
     fields,
     index,
     exercises.length,
-    rx,
+    '',
     historyRows,
     hints,
     completedCount,
@@ -2936,7 +2807,6 @@ async function renderChecklistItem(exercise, exercises) {
   const unit = state.settings?.weightUnit || 'kg';
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
-  const rx = formatLivePrescription(exercise, fields, unit);
   const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
   const historyRows = formatExerciseHistoryRows(history, unit);
   const hints = getProgressionHints(exercise, history);
@@ -2951,7 +2821,7 @@ async function renderChecklistItem(exercise, exercises) {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body screen-body--active">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints, completedCount, exercises, state.setLogs, state.mission)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, '', historyRows, hints, completedCount, exercises, state.setLogs, state.mission)}
       </div>
       <div class="screen-footer">
         ${renderActiveExerciseFooter(exercise, alreadyDone)}
