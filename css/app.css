@@ -145,20 +145,21 @@ body {
   min-height: 0;
 }
 
-.adjust-panel-slot {
-  min-height: 168px;
-  flex-shrink: 0;
-}
-
 .campaign-meta-link {
   border: none;
   background: none;
-  color: var(--accent);
+  color: var(--text-muted);
   font-size: inherit;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   padding: 0;
   margin-left: 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.campaign-meta-link:hover {
+  color: var(--text);
 }
 
 .screen-footer {
@@ -268,9 +269,10 @@ body {
 }
 
 .mission-brief-date {
-  margin: 0 0 14px;
-  font-size: 15px;
-  color: var(--text);
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .mission-brief-block {
@@ -448,13 +450,56 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 24px 20px;
+  padding: 20px 16px 16px;
   text-align: center;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  min-height: 220px;
+  min-height: 340px;
+}
+
+.exercise-focus {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.exercise-controls {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 12px;
+  text-align: left;
+}
+
+.exercise-controls .adjust-row:last-child {
+  margin-bottom: 0;
+}
+
+.exercise-secondary {
+  min-height: 168px;
+  max-height: 168px;
+  overflow-y: auto;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  text-align: left;
+}
+
+.exercise-secondary-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.exercise-secondary .exercise-prev {
+  margin-bottom: 12px;
 }
 
 .exercise-name {
@@ -2242,6 +2287,35 @@ body {
 
 .timed-countdown-start {
   margin-top: 4px;
+}
+
+.timed-countdown-ring--editable {
+  cursor: pointer;
+}
+
+.timed-countdown-ring--editable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.timed-countdown-edit {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.timed-countdown-edit .dial-btn {
+  flex-shrink: 0;
+}
+
+.timed-countdown-done {
+  margin-top: 0;
+  font-size: 12px;
+  padding: 4px 12px;
 }
 
 .exercise-swipe-card.timed-countdown-flash {

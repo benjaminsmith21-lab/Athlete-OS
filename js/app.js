@@ -158,7 +158,8 @@ const state = {
   durationTimerRemaining: 0,
   durationTimerTotal: 0,
   durationTimerTargetSeconds: null,
-  durationTimerSoundPlayed: false
+  durationTimerSoundPlayed: false,
+  durationEditMode: false
 };
 
 let restTimerInterval = null;
@@ -169,6 +170,9 @@ let restCompleteAudio = null;
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
 const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
 const DURATION_PREP_SECONDS = 5;
+const DURATION_EDIT_MIN = 5;
+const DURATION_EDIT_MAX = 300;
+const DURATION_EDIT_STEP = 5;
 
 const WORKOUT_COMPLETE_SOUNDS = [
   './assets/audio/workout%20complete/mission-accomplished.mp3',
@@ -311,7 +315,9 @@ function resetDurationTimer() {
   state.durationTimerPhase = 'idle';
   state.durationTimerRemaining = 0;
   state.durationTimerTotal = 0;
+  state.durationTimerTargetSeconds = null;
   state.durationTimerSoundPlayed = false;
+  state.durationEditMode = false;
 }
 
 function clearDurationTimer() {
@@ -561,11 +567,11 @@ function showRunDurationField(exercise) {
   return exercise.type === 'distance' && exercise.id === 'mon-z2';
 }
 
-function buildAdjustmentPanel(exercise, fields) {
+function buildExerciseControls(exercise, fields) {
   const unit = state.settings?.weightUnit || 'kg';
   const wStep = weightStep(unit);
 
-  let html = '<div class="adjust-panel" id="adjust-panel">';
+  let html = '';
 
   if (usesStandardRepDials(exercise)) {
     html += renderDialRow('Sets', 'adj-sets', fields.sets, { min: 1, max: 20, step: 1 });
@@ -616,8 +622,6 @@ function buildAdjustmentPanel(exercise, fields) {
     });
   }
 
-  html += '</div>';
-
   return html;
 }
 
@@ -636,21 +640,32 @@ function formatDurationClock(totalSeconds) {
 }
 
 function getTimedExerciseSeconds(exercise, fields) {
+  if (state.durationTimerTargetSeconds != null) return state.durationTimerTargetSeconds;
   const fromFields = fields?.duration;
   if (fromFields != null && fromFields !== '') return Math.round(Number(fromFields));
   if (exercise.duration != null) return Math.round(exercise.duration);
   return 20;
 }
 
+function adjustTimedDuration(delta, exercise, fields) {
+  const current = getTimedExerciseSeconds(exercise, fields);
+  const next = Math.max(DURATION_EDIT_MIN, Math.min(DURATION_EDIT_MAX, current + delta));
+  state.durationTimerTargetSeconds = next;
+  refreshTimedCountdownView(exercise, fields);
+}
+
 function renderTimedCountdownBlock(exercise, fields) {
-  const targetSeconds = state.durationTimerTargetSeconds ?? getTimedExerciseSeconds(exercise, fields);
+  const targetSeconds = getTimedExerciseSeconds(exercise, fields);
   const phase = state.durationTimerPhase;
   const remaining = state.durationTimerRemaining;
   const total = state.durationTimerTotal || targetSeconds;
   const progress =
     phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
 
-  let phaseLabel = 'Ready when you are';
+  const canEdit = phase === 'idle';
+  const editMode = state.durationEditMode && canEdit;
+
+  let phaseLabel = 'Tap to set duration';
   let displayTime = formatDurationClock(targetSeconds);
   if (phase === 'prep') {
     phaseLabel = 'Get ready…';
@@ -661,17 +676,46 @@ function renderTimedCountdownBlock(exercise, fields) {
   } else if (phase === 'done') {
     phaseLabel = "Time's up";
     displayTime = '0:00';
+  } else if (editMode) {
+    phaseLabel = 'Adjust duration';
+  } else if (canEdit) {
+    phaseLabel = 'Tap to set duration';
+  } else {
+    phaseLabel = 'Ready when you are';
   }
 
   const startDisabled = phase === 'prep' || phase === 'running' ? 'disabled' : '';
   const startLabel = phase === 'done' ? 'Restart Timer' : 'Start Timer';
 
+  const ringClasses = ['timed-countdown-ring'];
+  if (canEdit && !editMode) ringClasses.push('timed-countdown-ring--editable');
+
+  let ringInner = '';
+  if (editMode) {
+    ringInner = `
+      <div class="timed-countdown-edit">
+        <button type="button" class="dial-btn dial-minus" id="btn-duration-minus" aria-label="Decrease duration">−</button>
+        <span class="timed-countdown-time">${formatDurationClock(targetSeconds)}</span>
+        <button type="button" class="dial-btn dial-plus" id="btn-duration-plus" aria-label="Increase duration">+</button>
+      </div>
+    `;
+  } else {
+    ringInner = `<span class="timed-countdown-time">${displayTime}</span>`;
+  }
+
+  const ringAttrs = canEdit && !editMode
+    ? 'role="button" tabindex="0" id="btn-duration-ring" aria-label="Set hang duration"'
+    : canEdit && editMode
+      ? 'id="btn-duration-ring"'
+      : '';
+
   return `
     <div class="timed-countdown" id="timed-countdown">
-      <div class="timed-countdown-ring" style="--timed-progress: ${progress}%">
-        <span class="timed-countdown-time">${displayTime}</span>
+      <div class="${ringClasses.join(' ')}" style="--timed-progress: ${progress}%" ${ringAttrs}>
+        ${ringInner}
       </div>
       <p class="timed-countdown-label">${phaseLabel}</p>
+      ${editMode ? '<button type="button" class="btn-ghost timed-countdown-done" id="btn-duration-done">Done</button>' : ''}
       <button type="button" class="btn-secondary timed-countdown-start" id="btn-start-duration-timer" ${startDisabled}>
         ${startLabel}
       </button>
@@ -727,7 +771,15 @@ function startDurationTimerRunning(exercise, fields) {
 }
 
 function startDurationTimerPrep(exercise, fields) {
-  clearDurationTimer();
+  state.durationEditMode = false;
+  if (durationTimerInterval) {
+    clearInterval(durationTimerInterval);
+    durationTimerInterval = null;
+  }
+  state.durationTimerPhase = 'idle';
+  state.durationTimerRemaining = 0;
+  state.durationTimerTotal = 0;
+  state.durationTimerSoundPlayed = false;
   unlockRestCompleteSound();
   state.durationTimerPhase = 'prep';
   state.durationTimerRemaining = DURATION_PREP_SECONDS;
@@ -750,6 +802,37 @@ function bindDurationTimerControls(exercise, fields) {
   $('#btn-start-duration-timer')?.addEventListener('click', () => {
     if (state.durationTimerPhase === 'prep' || state.durationTimerPhase === 'running') return;
     startDurationTimerPrep(exercise, fields);
+  });
+
+  $('#btn-duration-ring')?.addEventListener('click', (e) => {
+    if (state.durationTimerPhase !== 'idle') return;
+    if (e.target.closest('#btn-duration-minus, #btn-duration-plus')) return;
+    state.durationEditMode = !state.durationEditMode;
+    refreshTimedCountdownView(exercise, fields);
+  });
+
+  $('#btn-duration-ring')?.addEventListener('keydown', (e) => {
+    if (state.durationTimerPhase !== 'idle' || state.durationEditMode) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      state.durationEditMode = true;
+      refreshTimedCountdownView(exercise, fields);
+    }
+  });
+
+  $('#btn-duration-minus')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    adjustTimedDuration(-DURATION_EDIT_STEP, exercise, fields);
+  });
+
+  $('#btn-duration-plus')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    adjustTimedDuration(DURATION_EDIT_STEP, exercise, fields);
+  });
+
+  $('#btn-duration-done')?.addEventListener('click', () => {
+    state.durationEditMode = false;
+    refreshTimedCountdownView(exercise, fields);
   });
 }
 
@@ -967,7 +1050,7 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   card.addEventListener(
     'touchstart',
     (e) => {
-      if (e.target.closest('.dial-btn, .exercise-note-link, button, input, textarea')) return;
+      if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-controls, .timed-countdown, button, input, textarea')) return;
       onStart(e.touches[0].clientX);
     },
     { passive: true }
@@ -984,7 +1067,7 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   card.addEventListener('touchcancel', finishSwipe);
 
   card.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.dial-btn, .exercise-note-link, button, input, textarea')) return;
+    if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-controls, .timed-countdown, button, input, textarea')) return;
     e.preventDefault();
     onStart(e.clientX);
 
@@ -999,6 +1082,11 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   });
+}
+
+function renderExerciseSecondaryBlock(prev, historyRows = [], hints = []) {
+  const content = renderPreviousBlock(prev, historyRows, hints);
+  return `<div class="exercise-secondary">${content || '<p class="exercise-secondary-empty">No previous sessions</p>'}</div>`;
 }
 
 function renderActiveExerciseBody(
@@ -1017,6 +1105,11 @@ function renderActiveExerciseBody(
 ) {
   const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
+  const controlsHtml = buildExerciseControls(exercise, fields);
+  const focusHtml =
+    exercise.type === 'timed'
+      ? renderTimedCountdownBlock(exercise, fields)
+      : `<p class="exercise-rx">${escapeHtml(rx)}</p>`;
 
   return `
     <div class="active-exercise-layout">
@@ -1031,18 +1124,15 @@ function renderActiveExerciseBody(
         <div class="exercise-swipe-card" id="exercise-swipe-card">
           <div class="exercise-card">
             <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-            <p class="exercise-rx">${escapeHtml(rx)}</p>
-            ${exercise.type === 'timed' ? renderTimedCountdownBlock(exercise, fields) : ''}
+            <div class="exercise-focus">${focusHtml}</div>
+            ${controlsHtml ? `<div class="exercise-controls">${controlsHtml}</div>` : ''}
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
-            ${renderPreviousBlock(prev, historyRows, hints)}
           </div>
         </div>
       </div>
       ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
 
-      <div class="adjust-panel-slot">
-        ${buildAdjustmentPanel(exercise, fields)}
-      </div>
+      ${renderExerciseSecondaryBlock(prev, historyRows, hints)}
     </div>
   `;
 }
@@ -1390,8 +1480,8 @@ async function buildMissionBriefCardHtml(blueprint, exerciseCount, completed, ac
   return `
     <div class="mission-card mission-brief">
       <p class="mission-brief-kicker">Today's Mission</p>
-      <h2 class="mission-brief-operation" style="color: ${operationColor}">${escapeHtml(op.label.toUpperCase())}</h2>
       <p class="mission-brief-date">${escapeHtml(dayHeading)}</p>
+      <h2 class="mission-brief-operation" style="color: ${operationColor}">${escapeHtml(op.label.toUpperCase())}</h2>
       <div class="mission-brief-block">
         <p class="mission-brief-label">Role</p>
         <p class="mission-brief-text">${escapeHtml(meta.role)}</p>
