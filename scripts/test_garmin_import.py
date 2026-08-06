@@ -174,7 +174,7 @@ def test_backup_includes_garmin_stores():
 
 def test_db_v4_stores():
     db_js = (ROOT / 'js/db.js').read_text(encoding='utf-8')
-    assert 'DB_VERSION = 4' in db_js
+    assert 'DB_VERSION = 5' in db_js
     assert 'dailyHealth' in db_js
     assert 'garminActivities' in db_js
     assert 'integrationSyncState' in db_js

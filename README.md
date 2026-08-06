@@ -35,6 +35,8 @@ The app caches for offline gym use after the first load.
 
 All data stored locally in IndexedDB. No account, no cloud, no API costs.
 
+**Backup:** Enable auto-backup in Settings and keep export files in Google Drive. See [`docs/backup.md`](docs/backup.md) for what survives clearing Chrome data and how to restore.
+
 ## Edit your program
 
 Workouts are defined in [`js/seed/blueprint-v1.js`](js/seed/blueprint-v1.js). Edit that file and refresh.

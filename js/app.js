@@ -64,15 +64,30 @@ import {
 import { getBodyCoachInsights, getHighConfidenceInsight, updateCampaignBaselineIfReady } from './services/bodyCoach.js';
 import { renderWeightChartSvg, getChartDateRange } from './services/bodyChart.js';
 import {
-  exportFullBackup,
-  downloadJson,
   exportBodyMeasurementsCsv,
   downloadCsv,
   parseBodyCsv,
   detectImportConflicts,
   applyBackup,
-  applyBodyMeasurementsImport
+  applyBodyMeasurementsImport,
+  validateBackup,
+  summarizeBackup
 } from './services/backup.js';
+import {
+  getBackupSnapshots,
+  restoreBackupSnapshot,
+  getSnapshotLabel
+} from './services/backupSnapshot.js';
+import {
+  requestPersistentStorage,
+  markBackupDirty,
+  runAutoExportIfNeeded,
+  performBackupExport,
+  shareLatestBackup,
+  getBackupStatusLine,
+  formatLastBackupLabel,
+  isLikelyFreshInstall
+} from './services/backupScheduler.js';
 import {
   importGarminSnapshot,
   getGarminSyncState,
@@ -116,7 +131,9 @@ const state = {
   importPreview: null,
   pendingWeighInDate: null,
   pendingBackup: null,
-  garminImportFlash: null
+  pendingBackupMode: 'merge',
+  garminImportFlash: null,
+  backupBanner: null
 };
 
 let restTimerInterval = null;
@@ -279,6 +296,14 @@ async function goHome() {
   state.mission = await getMission(state.mission.id);
   state.setLogs = await getSetLogsForMission(state.mission.id);
   renderCentre();
+}
+
+function toggleSettings() {
+  if (state.screen === 'settings') {
+    renderCentre();
+    return;
+  }
+  renderSettings();
 }
 
 function formatPrescriptionForDisplay(exercise, weightUnit) {
@@ -757,6 +782,7 @@ async function init() {
     }
 
     state.settings = await getSettings();
+    await requestPersistentStorage();
     state.campaign = await getActiveCampaign();
     state.blueprint = await getTodayBlueprint();
     if (!state.blueprint) {
@@ -765,14 +791,30 @@ async function init() {
     state.mission = await getOrCreateTodayMission(state.blueprint);
     state.setLogs = await getSetLogsForMission(state.mission.id);
 
+    const autoBackup = await runAutoExportIfNeeded();
+    if (autoBackup) {
+      state.backupBanner = {
+        message: 'Backup saved to Downloads',
+        data: autoBackup.data,
+        filename: autoBackup.filename
+      };
+    }
+
+    const freshInstall =
+      !state.settings.restorePromptDismissed && (await isLikelyFreshInstall());
+
     if (state.mission.status === MISSION_STATUS.COMPLETE) {
       renderComplete(true);
     } else {
       renderCentre();
     }
 
+    if (freshInstall) {
+      openFirstRunRestoreOverlay();
+    }
+
     $('#btn-home').addEventListener('click', goHome);
-    $('#btn-settings').addEventListener('click', () => renderSettings());
+    $('#btn-settings').addEventListener('click', () => toggleSettings());
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) closeOverlay();
     });
@@ -1006,6 +1048,7 @@ async function submitWeighIn(skipChecks = {}) {
   closeOverlay();
   state.pendingWeighInDate = null;
   state.bodySaveFlash = 'Weigh-in saved';
+  await markBackupDirty();
   setTimeout(() => {
     state.bodySaveFlash = null;
   }, 2500);
@@ -1275,11 +1318,94 @@ function openDeleteMeasurementOverlay(id) {
   overlay.classList.remove('hidden');
   $('#btn-confirm-delete-measurement').addEventListener('click', async () => {
     await deleteMeasurement(id);
+    await markBackupDirty();
     closeOverlay();
     await loadBodyMeasurements();
     renderBodyComposition();
   });
   $('#btn-cancel-delete-measurement').addEventListener('click', closeOverlay);
+}
+
+function buildBackupBannerHtml() {
+  if (!state.backupBanner) return '';
+  return `
+    <div class="backup-banner" id="backup-banner">
+      <p class="backup-banner-text">${escapeHtml(state.backupBanner.message)}</p>
+      <div class="backup-banner-actions">
+        <button type="button" class="btn-ghost backup-banner-share" id="btn-backup-share">Share to Drive</button>
+        <button type="button" class="btn-ghost backup-banner-dismiss" id="btn-backup-dismiss">Dismiss</button>
+      </div>
+    </div>
+  `;
+}
+
+function bindBackupBanner() {
+  $('#btn-backup-dismiss')?.addEventListener('click', () => {
+    state.backupBanner = null;
+    $('#backup-banner')?.remove();
+  });
+  $('#btn-backup-share')?.addEventListener('click', async () => {
+    if (!state.backupBanner?.data) return;
+    const shared = await shareLatestBackup(state.backupBanner.data, state.backupBanner.filename);
+    if (shared) {
+      state.backupBanner = null;
+      $('#backup-banner')?.remove();
+    }
+  });
+}
+
+async function reloadAppStateAfterRestore() {
+  state.settings = await getSettings();
+  state.campaign = await getActiveCampaign();
+  state.blueprint = await getTodayBlueprint();
+  state.mission = await getOrCreateTodayMission(state.blueprint);
+  state.setLogs = await getSetLogsForMission(state.mission.id);
+  await loadBodyMeasurements();
+}
+
+function openFirstRunRestoreOverlay() {
+  overlayContent.innerHTML = `
+    <div class="weigh-in-form">
+      <p class="overlay-title">Restore your data?</p>
+      <p class="overlay-sub">If you cleared site data or reinstalled Athlete OS, import a backup file to recover your workouts, weigh-ins, and Garmin data.</p>
+      <button type="button" class="btn-primary" id="btn-first-run-import">Choose backup file</button>
+      <button type="button" class="btn-secondary" id="btn-first-run-skip">Start fresh</button>
+    </div>
+  `;
+  overlay.classList.add('overlay--weigh-in');
+  overlay.classList.remove('hidden');
+  $('#btn-first-run-import').addEventListener('click', () => {
+    closeOverlay();
+    renderSettings();
+    setTimeout(() => $('#btn-import-backup')?.click(), 0);
+  });
+  $('#btn-first-run-skip').addEventListener('click', async () => {
+    state.settings = await saveSettings({ restorePromptDismissed: true });
+    closeOverlay();
+  });
+}
+
+function openRestoreSnapshotOverlay() {
+  const snapshots = state.backupSnapshots || [];
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest) return;
+  overlayContent.innerHTML = `
+    <div class="weigh-in-form">
+      <p class="overlay-title">Restore local snapshot?</p>
+      <p class="overlay-sub">This replaces all current Athlete OS data with the snapshot from ${escapeHtml(getSnapshotLabel(latest))}. Use this if a recent import went wrong.</p>
+      <button type="button" class="btn-primary btn-danger" id="btn-confirm-restore-snapshot">Restore snapshot</button>
+      <button type="button" class="btn-secondary" id="btn-cancel-restore-snapshot">Cancel</button>
+    </div>
+  `;
+  overlay.classList.add('overlay--weigh-in');
+  overlay.classList.remove('hidden');
+  $('#btn-confirm-restore-snapshot').addEventListener('click', async () => {
+    await restoreBackupSnapshot(latest.id);
+    closeOverlay();
+    await reloadAppStateAfterRestore();
+    renderCentre();
+  });
+  $('#btn-cancel-restore-snapshot').addEventListener('click', closeOverlay);
 }
 
 function renderCentre() {
@@ -1317,6 +1443,7 @@ function renderCentre() {
     screenRoot.innerHTML = `
       <div class="screen">
         <div class="screen-scroll">
+          ${buildBackupBannerHtml()}
           <p class="section-label">Active Campaign</p>
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
           <p class="campaign-meta">${escapeHtml(state.campaign.season)} · Week ${week} of ${state.campaign.durationWeeks}</p>
@@ -1357,6 +1484,7 @@ function renderCentre() {
     $('#btn-centre-fds')?.addEventListener('click', openFdsOverlay);
     $('#btn-centre-abort')?.addEventListener('click', openAbortOverlay);
     bindBodyStatusCard();
+    bindBackupBanner();
   }).catch((err) => {
     console.error('Command Centre render failed:', err);
     renderBootError(err?.message || 'Failed to render Command Centre');
@@ -1374,6 +1502,12 @@ async function renderSettings() {
   const garminSync = await getGarminSyncState();
   const history = await getMissionHistory(20);
   state.workoutHistory = history;
+  const backupStatusLine = await getBackupStatusLine();
+  const backupSnapshots = await getBackupSnapshots();
+  state.backupSnapshots = backupSnapshots;
+  const lastBackupLabel = formatLastBackupLabel(s.lastBackupExportAt);
+  const autoBackupOn = s.autoBackupEnabled !== false;
+  const backupInterval = s.autoBackupIntervalDays ?? 7;
 
   const garminStatus = garminSync.lastSuccessAt
     ? 'Current'
@@ -1465,10 +1599,27 @@ async function renderSettings() {
 
         <div class="settings-group">
           <p class="settings-group-title">Data & Backup</p>
-          <p class="settings-hint">Export all Athlete OS data or body measurements only.</p>
-          <button type="button" class="btn-secondary" id="btn-export-backup">Export full backup</button>
+          <div class="backup-status-card">
+            <p class="backup-status-line">${escapeHtml(backupStatusLine)}</p>
+            <p class="backup-status-sub">Last file export: ${escapeHtml(lastBackupLabel)}</p>
+            <div class="settings-toggle-row">
+              <span class="settings-toggle-label">Auto-backup to Downloads</span>
+              <button type="button" class="toggle-switch ${autoBackupOn ? 'on' : ''}" id="toggle-auto-backup" aria-pressed="${autoBackupOn}">
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+            <p class="settings-hint">Auto-backup interval</p>
+            <div class="segmented-control backup-interval-control">
+              <button type="button" class="segment-btn ${backupInterval === 7 ? 'selected' : ''}" data-interval="7">7 days</button>
+              <button type="button" class="segment-btn ${backupInterval === 14 ? 'selected' : ''}" data-interval="14">14 days</button>
+              <button type="button" class="segment-btn ${backupInterval === 30 ? 'selected' : ''}" data-interval="30">30 days</button>
+            </div>
+          </div>
+          <p class="settings-hint">Clearing site data removes app data. Auto-backup saves a JSON file to Downloads — move it to Google Drive for long-term safety.</p>
+          <button type="button" class="btn-secondary" id="btn-export-backup">Export now</button>
           <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-backup">Import full backup</button>
           <input type="file" id="import-backup-file" accept=".json,application/json" hidden>
+          ${backupSnapshots.length ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-restore-snapshot">Restore local snapshot</button>' : ''}
           <button type="button" class="btn-secondary btn-fds-inline" id="btn-export-body-csv">Export body measurements CSV</button>
           <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-body-csv">Import body measurements CSV</button>
           <input type="file" id="import-body-csv-file" accept=".csv,text/csv" hidden>
@@ -1515,6 +1666,19 @@ async function renderSettings() {
     renderSettings();
   });
 
+  $('#toggle-auto-backup')?.addEventListener('click', async () => {
+    const next = state.settings.autoBackupEnabled === false;
+    state.settings = await saveSettings({ autoBackupEnabled: next });
+    renderSettings();
+  });
+
+  document.querySelectorAll('.backup-interval-control .segment-btn[data-interval]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.settings = await saveSettings({ autoBackupIntervalDays: Number(btn.dataset.interval) });
+      renderSettings();
+    });
+  });
+
   document.querySelectorAll('.btn-delete-workout[data-mission-id]').forEach((btn) => {
     btn.addEventListener('click', () => openDeleteWorkoutOverlay(btn.dataset.missionId));
   });
@@ -1532,6 +1696,7 @@ async function renderSettings() {
         state.garminImportFlash = result.errors.join(' ');
       } else {
         state.garminImportFlash = `Imported ${result.dailyCount} daily records and ${result.activityCount} activities.`;
+        await markBackupDirty();
       }
     } catch (err) {
       state.garminImportFlash = err?.message || 'Import failed.';
@@ -1545,9 +1710,16 @@ async function renderSettings() {
   $('#btn-view-garmin')?.addEventListener('click', () => renderBodyComposition());
 
   $('#btn-export-backup').addEventListener('click', async () => {
-    const data = await exportFullBackup();
-    downloadJson(data, `athlete-os-backup-${getLocalDateString()}.json`);
+    const result = await performBackupExport();
+    state.backupBanner = {
+      message: 'Backup saved to Downloads',
+      data: result.data,
+      filename: result.filename
+    };
+    renderSettings();
   });
+
+  $('#btn-restore-snapshot')?.addEventListener('click', () => openRestoreSnapshotOverlay());
 
   $('#btn-import-backup').addEventListener('click', () => $('#import-backup-file').click());
 
@@ -1556,9 +1728,11 @@ async function renderSettings() {
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      if (!data.schemaVersion) throw new Error('Invalid backup file');
+      const validation = validateBackup(data);
+      if (!validation.valid) throw new Error(validation.error);
       const existing = await getAllMeasurements();
       state.pendingBackup = data;
+      state.pendingBackupMode = 'replace';
       state.importPreview = detectImportConflicts(existing, data.bodyMeasurements || []);
       e.target.value = '';
       openBackupImportOverlay();
@@ -1597,6 +1771,8 @@ async function renderSettings() {
 
 function openBackupImportOverlay() {
   const preview = state.importPreview || [];
+  const backup = state.pendingBackup;
+  const summary = summarizeBackup(backup || {});
   const conflictCount = preview.filter((p) => p.conflict).length;
   const rowsHtml = preview.length
     ? preview
@@ -1619,40 +1795,79 @@ function openBackupImportOverlay() {
     : '<p class="settings-empty">No body measurements in backup.</p>';
 
   overlayContent.innerHTML = `
-    <p class="overlay-title">Import Backup</p>
-    <p class="overlay-sub">${preview.length} body measurements found${conflictCount ? ` (${conflictCount} conflicts)` : ''}. Other data will be merged.</p>
-    <div class="import-preview-list">${rowsHtml}</div>
-    <button type="button" class="btn-primary" id="btn-apply-backup-import">Apply Import</button>
-    <button type="button" class="btn-secondary" id="btn-cancel-backup-import">Cancel</button>
+    <div class="weigh-in-form">
+      <p class="overlay-title">Import Backup</p>
+      <p class="overlay-sub">Backup from ${escapeHtml(summary.exportedAt ? formatDisplayDate(summary.exportedAt.slice(0, 10)) : 'unknown date')}</p>
+      <div class="backup-import-summary">
+        <p>${summary.missions} missions · ${summary.setLogs} set logs · ${summary.bodyMeasurements} weigh-ins</p>
+        <p>${summary.dailyHealth} Garmin days · ${summary.garminActivities} activities</p>
+      </div>
+      <fieldset class="backup-import-mode">
+        <label class="backup-import-option">
+          <input type="radio" name="backup-import-mode" value="replace" ${state.pendingBackupMode === 'replace' ? 'checked' : ''}>
+          Replace all local data (recommended after site data clear)
+        </label>
+        <label class="backup-import-option">
+          <input type="radio" name="backup-import-mode" value="merge" ${state.pendingBackupMode === 'merge' ? 'checked' : ''}>
+          Merge with existing data
+        </label>
+      </fieldset>
+      <div class="backup-import-conflicts ${state.pendingBackupMode === 'merge' ? '' : 'hidden'}" id="backup-import-conflicts">
+        <p class="settings-hint">${preview.length} weigh-ins${conflictCount ? ` · ${conflictCount} conflicts` : ''}</p>
+        <div class="import-preview-list">${rowsHtml}</div>
+      </div>
+      <button type="button" class="btn-primary" id="btn-apply-backup-import">Apply Import</button>
+      <button type="button" class="btn-secondary" id="btn-cancel-backup-import">Cancel</button>
+    </div>
   `;
+  overlay.classList.add('overlay--weigh-in');
   overlay.classList.remove('hidden');
+
+  document.querySelectorAll('input[name="backup-import-mode"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      state.pendingBackupMode = input.value;
+      $('#backup-import-conflicts')?.classList.toggle('hidden', input.value !== 'merge');
+    });
+  });
 
   $('#btn-apply-backup-import').addEventListener('click', () => applyBackupImport());
   $('#btn-cancel-backup-import').addEventListener('click', () => {
     state.pendingBackup = null;
     state.importPreview = null;
+    state.pendingBackupMode = 'merge';
     closeOverlay();
   });
 }
 
 async function applyBackupImport() {
   const preview = state.importPreview || [];
+  const mode =
+    document.querySelector('input[name="backup-import-mode"]:checked')?.value ||
+    state.pendingBackupMode ||
+    'merge';
+  const replaceAll = mode === 'replace';
   const resolutions = preview.map((p, i) => {
     if (!p.conflict) return 'replace';
     return $(`#import-action-${i}`)?.value || 'skip';
   });
 
   if (state.pendingBackup) {
-    await applyBackup(state.pendingBackup);
-    await applyBodyMeasurementsImport(preview, resolutions);
+    await applyBackup(state.pendingBackup, { replaceAll });
+    if (replaceAll) {
+      await applyBodyMeasurementsImport(preview, [], { replaceAll: true });
+    } else {
+      await applyBodyMeasurementsImport(preview, resolutions);
+    }
+    await markBackupDirty();
   }
 
   closeOverlay();
   state.pendingBackup = null;
   state.importPreview = null;
-  await loadBodyMeasurements();
-  state.campaign = await getActiveCampaign();
-  renderSettings();
+  state.pendingBackupMode = 'merge';
+  await reloadAppStateAfterRestore();
+  if (replaceAll) renderCentre();
+  else renderSettings();
 }
 
 function openImportPreviewOverlay() {
@@ -1695,6 +1910,7 @@ async function applyImportPreview() {
     return $(`#import-action-${i}`)?.value || 'skip';
   });
   await applyBodyMeasurementsImport(preview, resolutions);
+  await markBackupDirty();
   closeOverlay();
   state.importPreview = null;
   await loadBodyMeasurements();
@@ -1916,6 +2132,7 @@ async function renderComplete(alreadyDone = false) {
     $('#btn-save-complete').addEventListener('click', async () => {
       state.mission = await completeMission(state.mission, state.selectedRating);
       await updateIntegrityAfterMission(state.mission);
+      await markBackupDirty();
       renderComplete(true);
     });
   } else {
@@ -2110,6 +2327,7 @@ async function confirmDeleteWorkout(missionId) {
   if (!deleted) return;
 
   await adjustIntegrityAfterDelete(deleted);
+  await markBackupDirty();
 
   if (state.mission?.id === missionId) {
     state.mission = await getOrCreateTodayMission(state.blueprint);

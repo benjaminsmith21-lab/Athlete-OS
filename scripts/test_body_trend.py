@@ -234,7 +234,7 @@ def test_body_trend_js_exports():
 
 def test_db_v4_body_and_garmin_stores():
     text = (ROOT / 'js/db.js').read_text(encoding='utf-8')
-    assert 'DB_VERSION = 4' in text
+    assert 'DB_VERSION = 5' in text
     assert 'bodyMeasurements' in text
     assert 'dailyHealth' in text
     assert 'garminActivities' in text

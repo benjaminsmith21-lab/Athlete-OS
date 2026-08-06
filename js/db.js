@@ -1,5 +1,19 @@
 const DB_NAME = 'athlete-os';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
+
+export const STORE_KEY_PATHS = {
+  campaigns: 'id',
+  weeklyBlueprints: 'id',
+  missions: 'id',
+  setLogs: 'id',
+  integrity: 'campaignId',
+  settings: 'id',
+  bodyMeasurements: 'id',
+  dailyHealth: 'localDate',
+  garminActivities: 'sourceActivityId',
+  integrationSyncState: 'integration',
+  backupSnapshots: 'id'
+};
 
 const STORES = {
   campaigns: { keyPath: 'id' },
@@ -24,7 +38,11 @@ const STORES = {
       { name: 'type', keyPath: 'type' }
     ]
   },
-  integrationSyncState: { keyPath: 'integration' }
+  integrationSyncState: { keyPath: 'integration' },
+  backupSnapshots: {
+    keyPath: 'id',
+    indexes: [{ name: 'createdAt', keyPath: 'createdAt' }]
+  }
 };
 
 let dbPromise = null;
@@ -50,6 +68,21 @@ export function openDB() {
     });
   }
   return dbPromise;
+}
+
+export async function clearStore(storeName) {
+  const keyPath = STORE_KEY_PATHS[storeName];
+  if (!keyPath) throw new Error(`Unknown store: ${storeName}`);
+  const existing = await getAll(storeName);
+  for (const item of existing) {
+    await remove(storeName, item[keyPath]);
+  }
+}
+
+export async function clearAllStores(storeNames) {
+  for (const storeName of storeNames) {
+    await clearStore(storeName);
+  }
 }
 
 export async function get(storeName, key) {

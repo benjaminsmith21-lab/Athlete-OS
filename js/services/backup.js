@@ -1,8 +1,20 @@
-import { getAll } from '../db.js';
+import { getAll, clearStore, clearAllStores, put } from '../db.js';
 import { getLocalISOString } from '../utils/datetime.js';
 import { getAllMeasurements, saveDailyMeasurement } from './bodyMeasurement.js';
 
 export const BACKUP_SCHEMA_VERSION = 3;
+
+export const BACKUP_STORES = [
+  'campaigns',
+  'weeklyBlueprints',
+  'missions',
+  'setLogs',
+  'integrity',
+  'settings',
+  'dailyHealth',
+  'garminActivities',
+  'integrationSyncState'
+];
 
 export async function exportFullBackup() {
   const [
@@ -17,17 +29,17 @@ export async function exportFullBackup() {
     garminActivities,
     integrationSyncState
   ] = await Promise.all([
-      getAll('campaigns'),
-      getAll('weeklyBlueprints'),
-      getAll('missions'),
-      getAll('setLogs'),
-      getAll('integrity'),
-      getAll('settings'),
-      getAllMeasurements(),
-      getAll('dailyHealth'),
-      getAll('garminActivities'),
-      getAll('integrationSyncState')
-    ]);
+    getAll('campaigns'),
+    getAll('weeklyBlueprints'),
+    getAll('missions'),
+    getAll('setLogs'),
+    getAll('integrity'),
+    getAll('settings'),
+    getAllMeasurements(),
+    getAll('dailyHealth'),
+    getAll('garminActivities'),
+    getAll('integrationSyncState')
+  ]);
 
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -45,14 +57,67 @@ export async function exportFullBackup() {
   };
 }
 
+export function validateBackup(data) {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Invalid backup file.' };
+  }
+  if (!data.schemaVersion) {
+    return { valid: false, error: 'Missing schema version.' };
+  }
+
+  const requiredArrays = [
+    'campaigns',
+    'weeklyBlueprints',
+    'missions',
+    'setLogs',
+    'integrity',
+    'settings',
+    'bodyMeasurements',
+    'dailyHealth',
+    'garminActivities',
+    'integrationSyncState'
+  ];
+
+  for (const key of requiredArrays) {
+    if (!Array.isArray(data[key])) {
+      return { valid: false, error: `Backup is missing a valid ${key} list.` };
+    }
+  }
+
+  return { valid: true };
+}
+
+export function summarizeBackup(data) {
+  return {
+    missions: data.missions?.length ?? 0,
+    setLogs: data.setLogs?.length ?? 0,
+    bodyMeasurements: data.bodyMeasurements?.length ?? 0,
+    dailyHealth: data.dailyHealth?.length ?? 0,
+    garminActivities: data.garminActivities?.length ?? 0,
+    exportedAt: data.exportedAt || null
+  };
+}
+
+export function createBackupBlob(data) {
+  return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+}
+
 export function downloadJson(data, filename) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const blob = createBackupBlob(data);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function shareBackupFile(data, filename) {
+  const blob = createBackupBlob(data);
+  const file = new File([blob], filename, { type: 'application/json' });
+  if (!navigator.canShare?.({ files: [file] })) return false;
+  await navigator.share({ files: [file], title: 'Athlete OS backup' });
+  return true;
 }
 
 export function exportBodyMeasurementsCsv(measurements) {
@@ -158,26 +223,10 @@ function parseEufyRow(cols, header) {
 }
 
 export async function applyBackup(data, options = {}) {
-  const { put, getAll: getAllDb } = await import('../db.js');
-  const stores = [
-    'campaigns',
-    'weeklyBlueprints',
-    'missions',
-    'setLogs',
-    'integrity',
-    'settings',
-    'dailyHealth',
-    'garminActivities',
-    'integrationSyncState'
-  ];
+  const stores = BACKUP_STORES;
 
   if (options.replaceAll) {
-    for (const store of stores) {
-      const existing = await getAllDb(store);
-      for (const item of existing) {
-        await (await import('../db.js')).remove(store, item[store === 'integrity' ? 'campaignId' : 'id']);
-      }
-    }
+    await clearAllStores([...stores, 'bodyMeasurements']);
   }
 
   for (const store of stores) {
@@ -198,7 +247,23 @@ export function detectImportConflicts(existing, imported) {
   }));
 }
 
-export async function applyBodyMeasurementsImport(preview, resolutions = []) {
+export async function applyBodyMeasurementsImport(preview, resolutions = [], options = {}) {
+  if (options.replaceAll) {
+    await clearStore('bodyMeasurements');
+    for (const p of preview) {
+      await saveDailyMeasurement(
+        {
+          weightKg: p.row.weightKg,
+          bodyFatPercent: p.row.bodyFatPercent,
+          waistCm: p.row.waistCm,
+          note: p.row.note
+        },
+        { date: p.row.date, source: p.row.source || 'manual' }
+      );
+    }
+    return;
+  }
+
   for (let i = 0; i < preview.length; i++) {
     const p = preview[i];
     const action = resolutions[i] || (p.conflict ? 'skip' : 'replace');
@@ -211,6 +276,21 @@ export async function applyBodyMeasurementsImport(preview, resolutions = []) {
         note: p.row.note
       },
       { date: p.row.date, source: p.row.source || 'manual' }
+    );
+  }
+}
+
+export async function replaceAllBodyMeasurements(rows) {
+  await clearStore('bodyMeasurements');
+  for (const row of rows) {
+    await saveDailyMeasurement(
+      {
+        weightKg: row.weightKg,
+        bodyFatPercent: row.bodyFatPercent,
+        waistCm: row.waistCm,
+        note: row.note
+      },
+      { date: row.date, source: row.source || 'manual' }
     );
   }
 }

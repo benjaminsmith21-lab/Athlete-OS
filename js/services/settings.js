@@ -7,7 +7,12 @@ export const DEFAULT_SETTINGS = {
   weightUnit: 'kg',
   restTimerSeconds: 60,
   showNextExerciseOnRest: true,
-  restTimerSoundEnabled: true
+  restTimerSoundEnabled: true,
+  autoBackupEnabled: true,
+  autoBackupIntervalDays: 7,
+  lastBackupExportAt: null,
+  backupDirtyAt: null,
+  restorePromptDismissed: false
 };
 
 const KG_TO_LBS = 2.20462;
