@@ -12,7 +12,12 @@ export const DEFAULT_SETTINGS = {
   autoBackupIntervalDays: 7,
   lastBackupExportAt: null,
   backupDirtyAt: null,
-  restorePromptDismissed: false
+  restorePromptDismissed: false,
+  warmupWeights: {
+    halosKg: 20,
+    carryKg: 12.5,
+    flowKg: 24
+  }
 };
 
 const KG_TO_LBS = 2.20462;

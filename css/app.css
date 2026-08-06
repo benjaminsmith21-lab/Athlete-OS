@@ -544,57 +544,102 @@ body {
   flex-direction: column;
   align-items: center;
   min-height: 0;
+  width: 100%;
 }
 
 .warmup-layout .section-label {
   align-self: stretch;
   text-align: center;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
-.warmup-card {
-  justify-content: flex-start;
+.warmup-panel {
+  flex: 1;
   width: 100%;
-  max-width: 100%;
-  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 20px;
+  min-height: 0;
+  box-sizing: border-box;
+  text-align: center;
 }
 
 .warmup-ring-wrap {
   display: flex;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.warmup-ring-wrap .warmup-ring,
+.warmup-ring-wrap .timed-countdown-ring {
+  width: 160px;
+  height: 160px;
+}
+
+.warmup-ring-wrap .timed-countdown-time {
+  font-size: 32px;
 }
 
 .warmup-title {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .warmup-rx {
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: 20px;
   color: var(--accent);
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   line-height: 1.3;
 }
 
 .warmup-flow-lines {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   padding: 0;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.5;
   color: var(--text);
 }
 
 .warmup-flow-lines li + li {
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .warmup-purpose {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--text-muted);
+}
+
+.warmup-weight-panel {
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+
+.warmup-weight-panel .adjust-row:last-child {
+  margin-bottom: 0;
+}
+
+.warmup-layout .exercise-dots {
+  flex-shrink: 0;
+  margin-top: 12px;
 }
 
 .warmup-footer {

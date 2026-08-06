@@ -44,6 +44,7 @@ import {
   getSettings,
   saveSettings,
   kgToUnit,
+  unitToKg,
   convertWeight,
   weightStep,
   bodyweightStart
@@ -353,20 +354,79 @@ function clearWarmupTimer() {
   }
 }
 
+function getWarmupWeights() {
+  const defaults = { halosKg: 20, carryKg: 12.5, flowKg: 24 };
+  return { ...defaults, ...state.settings?.warmupWeights };
+}
+
+function renderWarmupFlowLines(unit) {
+  const weights = getWarmupWeights();
+  const w = kgToUnit(weights.flowKg, unit);
+  return [
+    `5 Goblet Squats (${w}${unit})`,
+    '5 Romanian Deadlifts',
+    '5 Bent-over Rows each arm'
+  ];
+}
+
 function formatWarmupStepRx(step, unit) {
-  if (step.flowLines?.length) {
+  const weights = getWarmupWeights();
+  if (step.isFlow) {
     return step.rx;
   }
-  if (step.weightKg != null) {
-    const w = kgToUnit(step.weightKg, unit);
+  if (step.minute === 1) {
+    const w = kgToUnit(weights.halosKg, unit);
     return `${step.rx} · ${w}${unit}`;
   }
-  if (step.weightMinKg != null && step.weightMaxKg != null) {
-    const wMin = kgToUnit(step.weightMinKg, unit);
-    const wMax = kgToUnit(step.weightMaxKg, unit);
-    return `${step.rx} · ${wMin}–${wMax}${unit}`;
+  if (step.minute === 2) {
+    const w = kgToUnit(weights.carryKg, unit);
+    return `${step.rx} · ${w}${unit}`;
   }
   return step.rx;
+}
+
+function renderWarmupWeightPanel() {
+  const unit = state.settings?.weightUnit || 'kg';
+  const weights = getWarmupWeights();
+  const wStep = weightStep(unit);
+  const max = unit === 'lbs' ? 88 : 40;
+
+  return `
+    <div class="warmup-weight-panel" id="warmup-weight-panel">
+      ${renderDialRow(`Halos (${unit})`, 'adj-warmup-halos', kgToUnit(weights.halosKg, unit), {
+        min: 4,
+        max,
+        step: wStep
+      })}
+      ${renderDialRow(`Carry (${unit})`, 'adj-warmup-carry', kgToUnit(weights.carryKg, unit), {
+        min: 4,
+        max,
+        step: wStep
+      })}
+      ${renderDialRow(`Flow KB (${unit})`, 'adj-warmup-flow', kgToUnit(weights.flowKg, unit), {
+        min: 8,
+        max,
+        step: wStep
+      })}
+    </div>
+  `;
+}
+
+async function persistWarmupWeight(key, displayValue, unit) {
+  const valueKg = unitToKg(displayValue, unit);
+  if (valueKg == null) return;
+  const weights = { ...getWarmupWeights(), [key]: valueKg };
+  state.settings = await saveSettings({ warmupWeights: weights });
+  refreshWarmupView();
+}
+
+function bindWarmupDials(container) {
+  const unit = state.settings?.weightUnit || 'kg';
+  bindDials(container, null, {
+    'adj-warmup-halos': (v) => persistWarmupWeight('halosKg', v, unit),
+    'adj-warmup-carry': (v) => persistWarmupWeight('carryKg', v, unit),
+    'adj-warmup-flow': (v) => persistWarmupWeight('flowKg', v, unit)
+  });
 }
 
 function renderWarmupDots(activeIndex) {
@@ -395,26 +455,30 @@ function renderWarmupScreen() {
   const activeClass = isActive ? ' timed-countdown-ring--active' : '';
   const ariaLabel = isActive ? 'Warm-up in progress' : 'Start warm-up';
   const rx = formatWarmupStepRx(step, unit);
-  const flowHtml = step.flowLines?.length
-    ? `<ul class="warmup-flow-lines">${step.flowLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
+  const flowLines = step.isFlow ? renderWarmupFlowLines(unit) : [];
+  const flowHtml = flowLines.length
+    ? `<ul class="warmup-flow-lines">${flowLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
     : '';
+  const showWeightPanel = state.warmupPhase === 'idle' && state.warmupStepIndex === 0;
+  const weightPanelHtml = showWeightPanel ? renderWarmupWeightPanel() : '';
 
   return `
     <div class="warmup-layout">
       <p class="section-label">Warm-up · Minute ${step.minute} of ${WARMUP_STEPS.length}</p>
-      <div class="exercise-card warmup-card">
+      <div class="warmup-panel">
         <div class="warmup-ring-wrap">
-          <button type="button" class="timed-countdown-ring${activeClass}" id="btn-warmup-ring"
+          <button type="button" class="timed-countdown-ring warmup-ring${activeClass}" id="btn-warmup-ring"
             aria-label="${ariaLabel}" style="--timed-progress: ${progress}%" ${disabled}>
             <span class="timed-countdown-time">${displayTime}</span>
           </button>
         </div>
-        <h2 class="exercise-name warmup-title">${escapeHtml(step.title)}</h2>
+        <h2 class="warmup-title">${escapeHtml(step.title)}</h2>
         <p class="warmup-rx">${escapeHtml(rx)}</p>
         ${flowHtml}
         <p class="warmup-purpose">${escapeHtml(step.purpose)}</p>
       </div>
       ${renderWarmupDots(state.warmupStepIndex)}
+      ${weightPanelHtml}
     </div>
   `;
 }
@@ -440,6 +504,8 @@ function refreshWarmupView() {
   if (body) {
     body.innerHTML = renderWarmupScreen();
     bindWarmupControls(false);
+    const panel = $('#warmup-weight-panel');
+    if (panel) bindWarmupDials(body);
   }
 }
 
@@ -517,6 +583,8 @@ function renderWarmup() {
   `;
 
   bindWarmupControls();
+  const panel = $('#warmup-weight-panel');
+  if (panel) bindWarmupDials(screenRoot);
 }
 
 function formatElapsed(totalSeconds) {
@@ -688,7 +756,7 @@ function syncTimedDurationFromDial(exercise) {
   }
 }
 
-function bindDials(container, exercise = null) {
+function bindDials(container, exercise = null, dialCallbacks = {}) {
   const unit = state.settings?.weightUnit || 'kg';
 
   container.querySelectorAll('.dial').forEach((dial) => {
@@ -720,6 +788,8 @@ function bindDials(container, exercise = null) {
       if (dial.dataset.id === 'adj-duration') {
         syncTimedDurationFromDial(exercise);
       }
+      const cb = dialCallbacks[dial.dataset.id];
+      if (cb) cb(v);
     }
 
     minus.addEventListener('click', () => {

@@ -67,7 +67,7 @@ def test_service_worker_cache():
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
     assert 'workout%20complete/mission-accomplished.mp3' in text
-    assert 'athlete-os-v30' in text
+    assert 'athlete-os-v31' in text
     assert 'datetime.js' in text
 
 def test_manifest():
