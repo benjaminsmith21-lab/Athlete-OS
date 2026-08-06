@@ -30,6 +30,9 @@ REQUIRED_FILES = [
     'js/services/garminImport.js',
     'js/services/garminTrend.js',
     'js/services/garminCoach.js',
+    'js/services/campaignReview.js',
+    'js/services/garminChart.js',
+    'js/services/progressionCoach.js',
     'js/services/backupSnapshot.js',
     'js/services/backupScheduler.js',
     'assets/audio/rest-complete.wav',
@@ -54,6 +57,9 @@ def test_service_worker_cache():
     assert 'garminImport.js' in text
     assert 'garminTrend.js' in text
     assert 'garminCoach.js' in text
+    assert 'campaignReview.js' in text
+    assert 'garminChart.js' in text
+    assert 'progressionCoach.js' in text
     assert 'backupSnapshot.js' in text
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text

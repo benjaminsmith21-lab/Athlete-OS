@@ -1,6 +1,7 @@
 import { OPERATIONS, FDS_FALLBACKS } from './seed/blueprint-v1.js';
 import { getActiveCampaign, getTodayBlueprint, getCampaignWeek, updateCampaignBodyMetrics } from './services/campaign.js';
 import {
+  getExerciseHistory,
   getOrCreateTodayMission,
   getMission,
   saveMission,
@@ -106,9 +107,18 @@ import {
   getStepsSevenDayAverage,
   getStressSevenDayAverage,
   formatSleepDuration,
-  buildRecoveryTeaserLine
+  buildRecoveryTeaserLine,
+  daysSinceIsoDate
 } from './services/garminTrend.js';
 import { getGarminCoachInsights } from './services/garminCoach.js';
+import {
+  buildCampaignReviewData,
+  buildWeekStrip,
+  isReviewWeek
+} from './services/campaignReview.js';
+import { renderGarminChartSvg, getGarminChartDateRange } from './services/garminChart.js';
+import { getProgressionHints, formatExerciseHistoryRows } from './services/progressionCoach.js';
+import { getAll } from './db.js';
 import { getLocalDateString, formatDisplayDate } from './utils/datetime.js';
 
 const state = {
@@ -127,6 +137,8 @@ const state = {
   workoutHistory: [],
   bodyMeasurements: [],
   chartRange: 'campaign',
+  garminChartMetric: 'sleep',
+  garminChartRange: '30d',
   bodySaveFlash: null,
   importPreview: null,
   pendingWeighInDate: null,
@@ -334,7 +346,67 @@ function prepareFields(exercise, prev, settings) {
     fields.weight = kgToUnit(exercise.weight, unit);
   }
 
+  if (prev?.lastActual?.elapsedSeconds) {
+    fields.runDurationMinutes = Math.round(prev.lastActual.elapsedSeconds / 60);
+  }
+
   return fields;
+}
+
+function renderProgressionHintsHtml(hints) {
+  if (!hints?.length) return '';
+  return hints
+    .map(
+      (h) => `
+      <div class="coach-note progression-hint body-coach-${h.type}">
+        <strong>${escapeHtml(h.title)}</strong><br>${escapeHtml(h.message)}
+      </div>
+    `
+    )
+    .join('');
+}
+
+function renderExerciseHistoryHtml(rows) {
+  if (!rows?.length || rows.length <= 1) return '';
+  return `
+    <div class="exercise-history">
+      <p class="exercise-history-label">Recent sessions</p>
+      <table class="exercise-history-table">
+        <tbody>
+          ${rows
+            .map(
+              (r) =>
+                `<tr><td>${escapeHtml(formatDisplayDate(r.date))}</td><td>${escapeHtml(r.summary)}</td></tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderWeekStripHtml(days) {
+  const statusClass = {
+    completed: 'week-dot--done',
+    fds: 'week-dot--fds',
+    missed: 'week-dot--missed',
+    rest: 'week-dot--rest',
+    upcoming: 'week-dot--upcoming'
+  };
+  return `
+    <div class="week-strip" aria-label="This week">
+      ${days
+        .map(
+          (d) => `
+        <div class="week-strip-day ${d.isToday ? 'week-strip-day--today' : ''}">
+          <span class="week-strip-label">${d.label}</span>
+          <span class="week-dot ${statusClass[d.status] || ''}" title="${escapeHtml(d.status)}"></span>
+        </div>
+      `
+        )
+        .join('')}
+    </div>
+  `;
 }
 
 function renderDialRow(label, id, value, opts = {}) {
@@ -419,6 +491,10 @@ function showDistanceField(exercise) {
   return ['distance', 'carry'].includes(exercise.type);
 }
 
+function showRunDurationField(exercise) {
+  return exercise.type === 'distance' && exercise.id === 'mon-z2';
+}
+
 function buildAdjustmentPanel(exercise, fields) {
   const unit = state.settings?.weightUnit || 'kg';
   const wStep = weightStep(unit);
@@ -456,6 +532,14 @@ function buildAdjustmentPanel(exercise, fields) {
       min: 0,
       max: 50,
       step: 0.1
+    });
+  }
+
+  if (showRunDurationField(exercise)) {
+    html += renderDialRow('Duration (min)', 'adj-run-duration', fields.runDurationMinutes ?? '', {
+      min: 1,
+      max: 180,
+      step: 1
     });
   }
 
@@ -588,7 +672,7 @@ function bindExerciseActions(exercise) {
   });
 }
 
-function renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx) {
+function renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows = [], hints = []) {
   const progress = (exIndex / totalExercises) * 100;
   state.exerciseNoteDraft = fields.notes || '';
 
@@ -604,7 +688,7 @@ function renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercise
       <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
       <p class="exercise-rx">${escapeHtml(rx)}</p>
       <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
-      ${renderPreviousBlock(prev)}
+      ${renderPreviousBlock(prev, historyRows, hints)}
     </div>
 
     ${buildAdjustmentPanel(exercise, fields)}
@@ -636,6 +720,7 @@ function collectActualFromForm(exercise) {
   const weight = getDialValue('adj-weight');
   const duration = getDialValue('adj-duration');
   const distance = getDialValue('adj-distance');
+  const runDuration = getDialValue('adj-run-duration');
 
   if (sets != null) actual.sets = Math.round(sets);
   if (reps != null) actual.reps = Math.round(reps);
@@ -653,17 +738,25 @@ function collectActualFromForm(exercise) {
     actual.distance = distance;
     actual.distanceUnit = exercise.distanceUnit || 'km';
   }
-  if (state.exerciseNoteDraft) actual.notes = state.exerciseNoteDraft;
-  if (state.exerciseStartedAt) {
+  if (runDuration != null && showRunDurationField(exercise)) {
+    actual.elapsedSeconds = Math.round(runDuration * 60);
+  } else if (state.exerciseStartedAt) {
     actual.elapsedSeconds = Math.round(getExerciseElapsedSeconds());
   }
+
+  if (state.exerciseNoteDraft) actual.notes = state.exerciseNoteDraft;
 
   return actual;
 }
 
-function renderPreviousBlock(prev) {
-  if (!prev) return '';
-  return `<p class="exercise-prev">Last time: <span>${escapeHtml(prev.summary)}</span></p>`;
+function renderPreviousBlock(prev, historyRows = [], hints = []) {
+  let html = '';
+  if (prev) {
+    html += `<p class="exercise-prev">Last time: <span>${escapeHtml(prev.summary)}</span></p>`;
+  }
+  html += renderExerciseHistoryHtml(historyRows);
+  html += renderProgressionHintsHtml(hints);
+  return html;
 }
 
 async function afterExerciseComplete(done) {
@@ -1130,6 +1223,31 @@ function buildRecoverySectionHtml(dailyHealth, activities, garminSync, today) {
     )
     .join('');
 
+  const staleDays = garminSync.lastSuccessAt ? daysSinceIsoDate(garminSync.lastSuccessAt.slice(0, 10)) : null;
+  const staleNudge =
+    staleDays != null && staleDays > 7
+      ? `<p class="garmin-stale-nudge">Garmin import is ${staleDays} days old — consider refreshing in Settings.</p>`
+      : '';
+
+  const garminRange = getGarminChartDateRange(state.garminChartRange, state.campaign, today);
+  const garminChartSvg = renderGarminChartSvg(dailyHealth, {
+    ...garminRange,
+    metric: state.garminChartMetric,
+    campaignStartDate: state.campaign?.startDate
+  });
+  const metricButtons = ['sleep', 'rhr']
+    .map(
+      (key) =>
+        `<button type="button" class="segment-btn ${state.garminChartMetric === key ? 'selected' : ''}" data-garmin-metric="${key}">${key === 'sleep' ? 'Sleep' : 'RHR'}</button>`
+    )
+    .join('');
+  const garminRangeButtons = ['30d', 'campaign', '6mo', 'all']
+    .map(
+      (key) =>
+        `<button type="button" class="segment-btn ${state.garminChartRange === key ? 'selected' : ''}" data-garmin-range="${key}">${key === 'campaign' ? 'Campaign' : key.toUpperCase()}</button>`
+    )
+    .join('');
+
   return `
     <div class="health-section health-section--recovery">
       <p class="section-label">Recovery</p>
@@ -1164,6 +1282,12 @@ function buildRecoverySectionHtml(dailyHealth, activities, garminSync, today) {
       </div>
 
       ${garminInsightHtml}
+      ${staleNudge}
+
+      <p class="section-label health-subsection-label">Recovery Trends</p>
+      <div class="chart-range-control segmented-control garmin-metric-control">${metricButtons}</div>
+      <div class="chart-range-control segmented-control garmin-range-control">${garminRangeButtons}</div>
+      <div class="weight-chart garmin-trend-chart">${garminChartSvg}</div>
 
       <p class="section-label health-subsection-label">Recent Activity</p>
       ${activityHtml}
@@ -1278,6 +1402,20 @@ async function renderBodyComposition() {
   document.querySelectorAll('.chart-range-control .segment-btn[data-range]').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.chartRange = btn.dataset.range;
+      renderBodyComposition();
+    });
+  });
+
+  document.querySelectorAll('.garmin-metric-control .segment-btn[data-garmin-metric]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.garminChartMetric = btn.dataset.garminMetric;
+      renderBodyComposition();
+    });
+  });
+
+  document.querySelectorAll('.garmin-range-control .segment-btn[data-garmin-range]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.garminChartRange = btn.dataset.garminRange;
       renderBodyComposition();
     });
   });
@@ -1408,6 +1546,107 @@ function openRestoreSnapshotOverlay() {
   $('#btn-cancel-restore-snapshot').addEventListener('click', closeOverlay);
 }
 
+async function renderCampaignReview() {
+  clearRestTimer();
+  clearExerciseTimer();
+  state.screen = 'review';
+  setHeader('Campaign Review');
+
+  const today = getLocalDateString();
+  const now = new Date();
+  const [integrity, missions, setLogs, dailyHealth, heatmapData] = await Promise.all([
+    getIntegrity(),
+    getAll('missions'),
+    getAll('setLogs'),
+    getAllDailyHealth(),
+    getMonthHeatmapData(now.getFullYear(), now.getMonth())
+  ]);
+  await loadBodyMeasurements();
+
+  const review = await buildCampaignReviewData({
+    campaign: state.campaign,
+    measurements: state.bodyMeasurements,
+    dailyHealth,
+    missions,
+    setLogs,
+    integrity,
+    endDate: today
+  });
+
+  const heatmapSummary = `${review.integrity.executionRate}% execution · ${review.integrity.missionsCompleted} missions · ${review.integrity.fdsCount} FDS`;
+  const heatmapHtml = renderIntegrityHeatmapTile(escapeHtml(heatmapSummary), heatmapData);
+
+  const milestoneRows = review.milestones
+    .map(
+      (m) => `
+      <tr>
+        <td>${escapeHtml(m.label)}</td>
+        <td>${escapeHtml(m.current)}</td>
+        <td>${escapeHtml(m.previous)}</td>
+        ${m.delta ? `<td>${escapeHtml(m.delta)}</td>` : '<td>—</td>'}
+      </tr>
+    `
+    )
+    .join('');
+
+  const rulesHtml = (review.progressionRules || [])
+    .map((r) => `<li>${escapeHtml(r)}</li>`)
+    .join('');
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <p class="section-label">Campaign Review</p>
+        <h1 class="campaign-title">Week ${review.week}</h1>
+        <p class="campaign-meta">${escapeHtml(formatDisplayDate(review.periodStart))} – ${escapeHtml(formatDisplayDate(review.endDate))}</p>
+
+        <p class="section-label">Integrity</p>
+        <div class="review-metrics">
+          <div class="body-metric-card"><span>Execution rate</span><strong>${review.integrity.executionRate}%</strong></div>
+          <div class="body-metric-card"><span>Missions completed</span><strong>${review.integrity.missionsCompleted}</strong></div>
+          <div class="body-metric-card"><span>FDS (period)</span><strong>${review.integrity.fdsCount}</strong></div>
+          <div class="body-metric-card"><span>Full / perfect</span><strong>${review.integrity.fullCount}</strong></div>
+        </div>
+        ${heatmapHtml}
+
+        <p class="section-label">Body</p>
+        <div class="review-metrics">
+          <div class="body-metric-card"><span>7-day weight avg</span><strong>${review.body.weightAvg != null ? `${review.body.weightAvg.toFixed(1)} kg` : '—'}</strong></div>
+          <div class="body-metric-card"><span>4-week change</span><strong>${review.body.weightDelta != null ? formatWeightChange(review.body.weightDelta) : '—'}</strong></div>
+          <div class="body-metric-card"><span>Weigh-ins</span><strong>${review.body.weighIns}</strong></div>
+        </div>
+
+        <p class="section-label">Recovery</p>
+        <div class="review-metrics">
+          <div class="body-metric-card"><span>Sleep (7-day avg)</span><strong>${review.recovery.sleepLabel || '—'}</strong></div>
+          <div class="body-metric-card"><span>RHR (7-day avg)</span><strong>${review.recovery.rhrAvg != null ? `${Math.round(review.recovery.rhrAvg)} bpm` : '—'}</strong></div>
+          <div class="body-metric-card"><span>Days with data</span><strong>${review.recovery.daysWithData}</strong></div>
+        </div>
+
+        <p class="section-label">Milestones</p>
+        <p class="review-milestone-hint">Latest vs previous 4-week period</p>
+        <table class="milestone-table">
+          <thead>
+            <tr><th>Metric</th><th>Current</th><th>Previous</th><th>Change</th></tr>
+          </thead>
+          <tbody>${milestoneRows}</tbody>
+        </table>
+
+        <div class="review-reminder">
+          <p class="section-label">Progression Reminder</p>
+          <ul class="review-rules">${rulesHtml}</ul>
+          ${review.finalReminder ? `<p class="review-final">${escapeHtml(review.finalReminder)}</p>` : ''}
+        </div>
+      </div>
+      <div class="screen-footer">
+        <button type="button" class="btn-secondary" id="btn-back-centre-review">Back to Command Centre</button>
+      </div>
+    </div>
+  `;
+
+  $('#btn-back-centre-review').addEventListener('click', () => renderCentre());
+}
+
 function renderCentre() {
   state.screen = 'centre';
   const completed = state.mission.status === MISSION_STATUS.COMPLETE;
@@ -1419,17 +1658,26 @@ function renderCentre() {
   const exerciseCount = state.blueprint.exercises.length;
 
   const now = new Date();
+  const today = getLocalDateString();
 
   Promise.all([
     getIntegrity(),
     getCompletedMissionsThisWeek(),
     getMonthHeatmapData(now.getFullYear(), now.getMonth()),
-    loadBodyMeasurements()
-  ]).then(async ([integrity, weekly, heatmapData]) => {
+    loadBodyMeasurements(),
+    buildWeekStrip(today)
+  ]).then(async ([integrity, weekly, heatmapData, , weekStrip]) => {
     const stats = await getWeeklyStats(weekly);
     const summary = formatIntegritySummary(integrity, stats);
     const heatmapHtml = renderIntegrityHeatmapTile(escapeHtml(summary), heatmapData);
     const bodyStatusHtml = await buildBodyStatusCardHtml();
+    const reviewDue = isReviewWeek(week);
+    const reviewBadge = reviewDue
+      ? '<span class="review-badge">Review available</span>'
+      : '';
+    const lastBackupLabel = formatLastBackupLabel(state.settings?.lastBackupExportAt);
+    const backupLineHtml = `<p class="centre-backup-line">Last backup: ${escapeHtml(lastBackupLabel)}</p>`;
+    const weekStripHtml = renderWeekStripHtml(weekStrip);
 
     let primaryLabel = 'Begin Mission';
     let primaryAction = () => renderBriefing();
@@ -1446,7 +1694,9 @@ function renderCentre() {
           ${buildBackupBannerHtml()}
           <p class="section-label">Active Campaign</p>
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
-          <p class="campaign-meta">${escapeHtml(state.campaign.season)} · Week ${week} of ${state.campaign.durationWeeks}</p>
+          <p class="campaign-meta">${escapeHtml(state.campaign.season)} · Week ${week} of ${state.campaign.durationWeeks} ${reviewBadge}</p>
+
+          ${weekStripHtml}
 
           <div class="centre-stack">
             <div class="mission-card">
@@ -1465,11 +1715,14 @@ function renderCentre() {
               ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
               ${active && !completed ? '<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">Abort Mission</button>' : ''}
               ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS — Do Something</button>' : ''}
+              <button type="button" class="btn-secondary" id="btn-campaign-review">Campaign Review</button>
             </div>
 
             ${bodyStatusHtml}
 
             ${heatmapHtml}
+
+            ${backupLineHtml}
           </div>
         </div>
       </div>
@@ -1483,6 +1736,7 @@ function renderCentre() {
     }
     $('#btn-centre-fds')?.addEventListener('click', openFdsOverlay);
     $('#btn-centre-abort')?.addEventListener('click', openAbortOverlay);
+    $('#btn-campaign-review')?.addEventListener('click', () => renderCampaignReview());
     bindBodyStatusCard();
     bindBackupBanner();
   }).catch((err) => {
@@ -1924,45 +2178,61 @@ function renderBriefing() {
   const op = operationStyle(state.blueprint.operation);
   const unit = state.settings?.weightUnit || 'kg';
 
-  const exerciseItems = state.blueprint.exercises
-    .map((ex) => {
-      const rx = formatPrescriptionForDisplay(ex, unit);
-      return `<li><span>${escapeHtml(formatExerciseName(ex.name))}</span><span class="rx">${escapeHtml(rx)}</span></li>`;
+  Promise.all(
+    state.blueprint.exercises.map(async (ex) => {
+      const history = await getExerciseHistory(ex.id, 3);
+      const hints = getProgressionHints(ex, history);
+      return { ex, hints };
     })
-    .join('');
+  ).then((exerciseData) => {
+    CoachService.getBriefingNote(state.campaign).then((note) => {
+      const exerciseItems = exerciseData
+        .map(({ ex, hints }) => {
+          const rx = formatPrescriptionForDisplay(ex, unit);
+          const hintHtml = hints.length
+            ? `<div class="briefing-hints">${renderProgressionHintsHtml(hints)}</div>`
+            : '';
+          return `<li><span>${escapeHtml(formatExerciseName(ex.name))}</span><span class="rx">${escapeHtml(rx)}</span>${hintHtml}</li>`;
+        })
+        .join('');
 
-  CoachService.getBriefingNote(state.campaign).then((note) => {
-    screenRoot.innerHTML = `
-      <div class="screen">
-        <div class="screen-scroll">
-          <span class="operation-badge" style="${op.style}">${op.label}</span>
-          <h1 class="campaign-title">${escapeHtml(state.blueprint.dayName)} Mission</h1>
-          <p class="campaign-meta">${escapeHtml(state.blueprint.operation)} front</p>
+      const hintsSection = exerciseData.some((e) => e.hints.length)
+        ? '<p class="section-label">Progression Notes</p>'
+        : '';
 
-          <div class="identity-block">"${escapeHtml(note)}"</div>
+      screenRoot.innerHTML = `
+        <div class="screen">
+          <div class="screen-scroll">
+            <span class="operation-badge" style="${op.style}">${op.label}</span>
+            <h1 class="campaign-title">${escapeHtml(state.blueprint.dayName)} Mission</h1>
+            <p class="campaign-meta">${escapeHtml(state.blueprint.operation)} front</p>
 
-          <p class="section-label">Mission Loadout</p>
-          <ul class="exercise-list">${exerciseItems}</ul>
+            <div class="identity-block">"${escapeHtml(note)}"</div>
 
-          <div class="brief-footer">
-            <strong>Progression:</strong> ${escapeHtml(state.campaign.progressionRules[0])}<br>
-            <strong>Fuel:</strong> ${escapeHtml(state.campaign.nutrition[0])}
+            <p class="section-label">Mission Loadout</p>
+            <ul class="exercise-list">${exerciseItems}</ul>
+            ${hintsSection}
+
+            <div class="brief-footer">
+              <strong>Progression:</strong> ${escapeHtml(state.campaign.progressionRules[0])}<br>
+              <strong>Fuel:</strong> ${escapeHtml(state.campaign.nutrition[0])}
+            </div>
+          </div>
+          <div class="screen-footer">
+            <button type="button" class="btn-primary" id="btn-start">Start</button>
+            <button type="button" class="btn-secondary" id="btn-back-centre">Back</button>
           </div>
         </div>
-        <div class="screen-footer">
-          <button type="button" class="btn-primary" id="btn-start">Start</button>
-          <button type="button" class="btn-secondary" id="btn-back-centre">Back</button>
-        </div>
-      </div>
-    `;
+      `;
 
-    $('#btn-start').addEventListener('click', async () => {
-      state.mission = await startMission(state.mission);
-      state.setLogs = [];
-      state.checklistDone = new Set();
-      renderActive();
+      $('#btn-start').addEventListener('click', async () => {
+        state.mission = await startMission(state.mission);
+        state.setLogs = [];
+        state.checklistDone = new Set();
+        renderActive();
+      });
+      $('#btn-back-centre').addEventListener('click', () => renderCentre());
     });
-    $('#btn-back-centre').addEventListener('click', () => renderCentre());
   });
 }
 
@@ -1997,6 +2267,9 @@ async function renderActive() {
   const rx = formatPrescriptionForDisplay(exercise, unit);
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
+  const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
+  const historyRows = formatExerciseHistoryRows(history, unit);
+  const hints = getProgressionHints(exercise, history);
 
   const exIndex = exercises.indexOf(exercise);
   const totalExercises = exercises.length;
@@ -2006,7 +2279,7 @@ async function renderActive() {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints)}
       </div>
       <div class="screen-footer">
         ${renderActiveExerciseFooter(exercise)}
@@ -2071,6 +2344,9 @@ async function renderChecklistItem(exercise, exercises) {
   const rx = formatPrescriptionForDisplay(exercise, unit);
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
+  const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
+  const historyRows = formatExerciseHistoryRows(history, unit);
+  const hints = getProgressionHints(exercise, history);
 
   const exIndex = exercises.indexOf(exercise);
   const totalExercises = exercises.length;
@@ -2080,7 +2356,7 @@ async function renderChecklistItem(exercise, exercises) {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-body">
-        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx)}
+        ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints)}
       </div>
       <div class="screen-footer">
         ${renderActiveExerciseFooter(exercise)}

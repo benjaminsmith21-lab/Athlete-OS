@@ -139,23 +139,27 @@ export async function abortMission(mission, blueprint) {
 }
 
 export async function getPreviousPerformance(exerciseId, excludeMissionId = null) {
-  const all = await getAll('setLogs');
-  const logs = all
-    .filter((l) => l.exerciseId === exerciseId && l.missionId !== excludeMissionId)
-    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
-
+  const logs = await getExerciseHistory(exerciseId, 1, excludeMissionId);
   if (!logs.length) return null;
 
   const last = logs[0];
   const summary = formatPerformanceSummary(last.exerciseName, last);
 
   return {
-    logs: [last],
+    logs,
     summary,
     lastNote: last.actual.notes || '',
     lastActual: last.actual,
     date: last.completedAt
   };
+}
+
+export async function getExerciseHistory(exerciseId, limit = 3, excludeMissionId = null) {
+  const all = await getAll('setLogs');
+  return all
+    .filter((l) => l.exerciseId === exerciseId && l.missionId !== excludeMissionId)
+    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+    .slice(0, limit);
 }
 
 export function formatPerformanceSummary(name, log) {

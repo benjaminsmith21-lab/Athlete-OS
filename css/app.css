@@ -1835,3 +1835,211 @@ body {
 .backup-import-conflicts.hidden {
   display: none;
 }
+
+/* Week strip (Command Centre) */
+.week-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin: 12px 0 16px;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.week-strip-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.week-strip-day--today .week-strip-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.week-strip-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.week-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.week-dot--done {
+  background: var(--success, #6b8f4e);
+}
+
+.week-dot--fds {
+  background: var(--accent);
+}
+
+.week-dot--missed {
+  background: #c45c5c;
+}
+
+.week-dot--rest {
+  background: var(--border);
+  opacity: 0.5;
+}
+
+.week-dot--upcoming {
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.review-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.centre-backup-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Campaign Review */
+.review-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.review-milestone-hint {
+  margin: -8px 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.milestone-table {
+  width: 100%;
+  margin-bottom: 20px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.milestone-table th,
+.milestone-table td {
+  padding: 8px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.milestone-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.review-reminder {
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.review-rules {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.review-final {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Exercise history & progression hints */
+.exercise-history {
+  margin-top: 12px;
+}
+
+.exercise-history-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exercise-history-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.exercise-history-table td {
+  padding: 4px 0;
+  color: var(--text-muted);
+}
+
+.exercise-history-table td:last-child {
+  text-align: right;
+  color: var(--text);
+}
+
+.progression-hint {
+  margin-top: 10px;
+}
+
+.briefing-hints {
+  margin-top: 6px;
+}
+
+.briefing-hints .progression-hint {
+  margin-top: 0;
+  font-size: 12px;
+}
+
+/* Garmin trend charts */
+.garmin-trend-chart {
+  margin-bottom: 16px;
+}
+
+.garmin-metric-control,
+.garmin-range-control {
+  margin-bottom: 8px;
+}
+
+.garmin-stale-nudge {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-left: 3px solid var(--accent);
+  background: rgba(196, 146, 58, 0.06);
+  border-radius: 0 6px 6px 0;
+}
+
+.garmin-chart-svg {
+  width: 100%;
+  height: auto;
+}
