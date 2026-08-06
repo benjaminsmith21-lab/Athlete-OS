@@ -916,6 +916,7 @@ function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
     state.setLogs = await getSetLogsForMission(state.mission.id);
 
     state.mission.currentExerciseIndex = Math.max(state.mission.currentExerciseIndex, exerciseIndex + 1);
+    state.activeExerciseIndex = state.mission.currentExerciseIndex;
     state.mission = await saveMission(state.mission);
 
     if (areRequiredExercisesDone(state.mission, state.setLogs)) {
@@ -925,10 +926,11 @@ function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
 
     const settings = await getSettings();
     state.settings = settings;
+    const nextIndex = state.mission.currentExerciseIndex;
     if (settings.restTimerSeconds > 0) {
-      renderRestTimer(settings.restTimerSeconds, () => renderActiveAtIndex(exerciseIndex));
+      renderRestTimer(settings.restTimerSeconds, () => renderActiveAtIndex(nextIndex));
     } else {
-      renderActiveAtIndex(exerciseIndex);
+      renderActiveAtIndex(nextIndex);
     }
   });
 
@@ -1212,6 +1214,14 @@ async function renderRestTimer(totalSeconds, onDone) {
 
   let remaining = totalSeconds;
   const restSoundPlayed = { value: false };
+  let restEnded = false;
+
+  function finishRest(stopSound = true) {
+    if (restEnded) return;
+    restEnded = true;
+    clearRestTimer(stopSound);
+    onDone();
+  }
 
   if (settings.restTimerSoundEnabled) {
     preloadRestCompleteSound();
@@ -1240,18 +1250,14 @@ async function renderRestTimer(totalSeconds, onDone) {
       </div>
     `;
 
-    $('#btn-skip-rest').addEventListener('click', () => {
-      clearRestTimer();
-      onDone();
-    });
+    $('#btn-skip-rest').addEventListener('click', () => finishRest(true));
   }
 
   render();
   restTimerInterval = setInterval(() => {
     remaining -= 1;
     if (remaining <= 0) {
-      clearRestTimer(false);
-      onDone();
+      finishRest(false);
     } else {
       maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed);
       render();
@@ -2667,6 +2673,8 @@ function renderBriefing() {
 
 async function renderActiveAtIndex(index) {
   clearRestTimer();
+  state.screen = 'active';
+  setHeader('Active Mission');
 
   const exercises = getActiveExercises(state.mission);
   if (!exercises.length || index < 0 || index >= exercises.length) {
