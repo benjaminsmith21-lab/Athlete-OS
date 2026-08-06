@@ -398,6 +398,86 @@ function formatPrescriptionForDisplay(exercise, weightUnit) {
   return formatPrescription(exercise);
 }
 
+function formatLivePrescription(exercise, fields, unit) {
+  const sets = fields.sets;
+  const reps = fields.reps;
+  const weight = fields.weight;
+  const weightLabel = fields.weightLabel;
+
+  if (exercise.type === 'timed') {
+    const duration = fields.duration ?? getTimedExerciseSeconds(exercise, fields);
+    const durUnit = exercise.durationUnit || 's';
+    if (sets) return `${duration}${durUnit} × ${sets} sets`;
+    return `${duration}${durUnit}`;
+  }
+
+  if (
+    weightLabel === 'bodyweight' ||
+    (isBodyweightRepsExercise(exercise) && (weight == null || weight === '' || Number(weight) <= 0))
+  ) {
+    if (reps && sets) return `BW × ${reps} × ${sets} sets`;
+    if (reps) return `BW × ${reps}`;
+  }
+
+  if (weight != null && weight !== '' && Number(weight) > 0) {
+    const w = Number(weight);
+    if (reps && sets) return `${w}${unit} × ${reps} × ${sets} sets`;
+    if (reps) return `${w}${unit} × ${reps}`;
+  }
+
+  if (reps && sets) return `${reps} × ${sets} sets`;
+  if (reps) return `${reps} reps`;
+
+  if (fields.distance != null && fields.distance !== '') {
+    return `${fields.distance}${exercise.distanceUnit || 'km'}`;
+  }
+
+  if (exercise.type === 'carry' && exercise.weightMin != null) {
+    const wMin = kgToUnit(exercise.weightMin, unit);
+    const wMax = kgToUnit(exercise.weightMax, unit);
+    return `${wMin}–${wMax}${unit}`;
+  }
+
+  return formatPrescriptionForDisplay(exercise, unit);
+}
+
+function readFieldsFromDials(exercise) {
+  const unit = state.settings?.weightUnit || 'kg';
+  const fields = {};
+  const sets = getDialValue('adj-sets');
+  const reps = getDialValue('adj-reps');
+  const weight = getDialValue('adj-weight');
+  const distance = getDialValue('adj-distance');
+
+  if (sets != null) fields.sets = Math.round(sets);
+  if (reps != null) fields.reps = Math.round(reps);
+
+  const weightEl = $('#adj-weight');
+  if (weightEl) {
+    const t = weightEl.textContent.trim();
+    if (t === 'BW') fields.weightLabel = 'bodyweight';
+    else if (weight != null && weight > 0) {
+      fields.weight = weight;
+      fields.weightUnit = unit;
+    }
+  }
+
+  if (exercise.type === 'timed') {
+    fields.duration = getTimedExerciseSeconds(exercise, null);
+  }
+
+  if (distance != null) fields.distance = distance;
+
+  return fields;
+}
+
+function updateExerciseRxDisplay(exercise) {
+  const el = $('#exercise-rx-display');
+  if (!el || !exercise) return;
+  const unit = state.settings?.weightUnit || 'kg';
+  el.textContent = formatLivePrescription(exercise, readFieldsFromDials(exercise), unit);
+}
+
 function prepareFields(exercise, prev, settings) {
   const fields = getExerciseFieldDefaults(exercise, prev);
   const unit = settings.weightUnit;
@@ -488,7 +568,7 @@ function renderDialRow(label, id, value, opts = {}) {
     </div>`;
 }
 
-function bindDials(container) {
+function bindDials(container, exercise = null) {
   const unit = state.settings?.weightUnit || 'kg';
 
   container.querySelectorAll('.dial').forEach((dial) => {
@@ -513,6 +593,9 @@ function bindDials(container) {
         valueEl.textContent = Math.round(v);
       } else {
         valueEl.textContent = String(Math.round(v * 2) / 2);
+      }
+      if (exercise && state.screen === 'active') {
+        updateExerciseRxDisplay(exercise);
       }
     }
 
@@ -652,6 +735,7 @@ function adjustTimedDuration(delta, exercise, fields) {
   const next = Math.max(DURATION_EDIT_MIN, Math.min(DURATION_EDIT_MAX, current + delta));
   state.durationTimerTargetSeconds = next;
   refreshTimedCountdownView(exercise, fields);
+  updateExerciseRxDisplay(exercise);
 }
 
 function renderTimedCountdownBlock(exercise, fields) {
@@ -943,7 +1027,7 @@ function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
 }
 
 function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
-  bindDials(screenRoot);
+  bindDials(screenRoot, exercise);
   bindNoteButton();
   bindExerciseSwipe(exercises, exerciseIndex);
   if (exercise.type === 'timed') {
@@ -1050,7 +1134,7 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   card.addEventListener(
     'touchstart',
     (e) => {
-      if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-controls, .timed-countdown, button, input, textarea')) return;
+      if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .timed-countdown, button, input, textarea')) return;
       onStart(e.touches[0].clientX);
     },
     { passive: true }
@@ -1067,7 +1151,7 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
   card.addEventListener('touchcancel', finishSwipe);
 
   card.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-controls, .timed-countdown, button, input, textarea')) return;
+    if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .timed-countdown, button, input, textarea')) return;
     e.preventDefault();
     onStart(e.clientX);
 
@@ -1082,11 +1166,6 @@ function bindExerciseSwipe(exercises, exerciseIndex) {
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   });
-}
-
-function renderExerciseSecondaryBlock(prev, historyRows = [], hints = []) {
-  const content = renderPreviousBlock(prev, historyRows, hints);
-  return `<div class="exercise-secondary">${content || '<p class="exercise-secondary-empty">No previous sessions</p>'}</div>`;
 }
 
 function renderActiveExerciseBody(
@@ -1106,10 +1185,6 @@ function renderActiveExerciseBody(
   const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
   const controlsHtml = buildExerciseControls(exercise, fields);
-  const focusHtml =
-    exercise.type === 'timed'
-      ? renderTimedCountdownBlock(exercise, fields)
-      : `<p class="exercise-rx">${escapeHtml(rx)}</p>`;
 
   return `
     <div class="active-exercise-layout">
@@ -1124,15 +1199,17 @@ function renderActiveExerciseBody(
         <div class="exercise-swipe-card" id="exercise-swipe-card">
           <div class="exercise-card">
             <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-            <div class="exercise-focus">${focusHtml}</div>
-            ${controlsHtml ? `<div class="exercise-controls">${controlsHtml}</div>` : ''}
+            <div class="exercise-focus">
+              <p class="exercise-rx" id="exercise-rx-display">${escapeHtml(rx)}</p>
+              ${exercise.type === 'timed' ? renderTimedCountdownBlock(exercise, fields) : ''}
+            </div>
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
           </div>
         </div>
       </div>
       ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
 
-      ${renderExerciseSecondaryBlock(prev, historyRows, hints)}
+      ${controlsHtml ? `<div class="exercise-adjust-panel" id="exercise-adjust-panel">${controlsHtml}</div>` : ''}
     </div>
   `;
 }
@@ -2724,9 +2801,9 @@ async function renderActiveAtIndex(index) {
 
   state.activeExerciseIndex = index;
   const unit = state.settings?.weightUnit || 'kg';
-  const rx = formatPrescriptionForDisplay(exercise, unit);
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
+  const rx = formatLivePrescription(exercise, fields, unit);
   const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
   const historyRows = formatExerciseHistoryRows(history, unit);
   const hints = getProgressionHints(exercise, history);
@@ -2857,9 +2934,9 @@ function renderChecklistActive(exercises) {
 
 async function renderChecklistItem(exercise, exercises) {
   const unit = state.settings?.weightUnit || 'kg';
-  const rx = formatPrescriptionForDisplay(exercise, unit);
   const prev = await getPreviousPerformance(exercise.id, state.mission.id);
   const fields = prepareFields(exercise, prev, state.settings);
+  const rx = formatLivePrescription(exercise, fields, unit);
   const history = await getExerciseHistory(exercise.id, 3, state.mission.id);
   const historyRows = formatExerciseHistoryRows(history, unit);
   const hints = getProgressionHints(exercise, history);

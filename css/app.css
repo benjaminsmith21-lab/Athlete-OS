@@ -456,7 +456,8 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  min-height: 340px;
+  height: 320px;
+  box-sizing: border-box;
 }
 
 .exercise-focus {
@@ -465,41 +466,20 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 120px;
+  min-height: 0;
 }
 
-.exercise-controls {
-  width: 100%;
-  margin-top: auto;
-  padding-top: 12px;
-  text-align: left;
-}
-
-.exercise-controls .adjust-row:last-child {
-  margin-bottom: 0;
-}
-
-.exercise-secondary {
-  min-height: 168px;
-  max-height: 168px;
-  overflow-y: auto;
+.exercise-adjust-panel {
   margin-top: 12px;
-  padding: 12px 14px;
+  padding: 12px;
   background: var(--bg-elevated);
   border-radius: 8px;
   text-align: left;
+  flex-shrink: 0;
 }
 
-.exercise-secondary-empty {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 24px 0;
-}
-
-.exercise-secondary .exercise-prev {
-  margin-bottom: 12px;
+.exercise-adjust-panel .adjust-row:last-child {
+  margin-bottom: 0;
 }
 
 .exercise-name {
