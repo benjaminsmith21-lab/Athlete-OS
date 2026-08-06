@@ -670,15 +670,17 @@ body {
 }
 
 .overlay--weigh-in {
-  align-items: center;
-  padding: 24px 20px calc(24px + var(--safe-bottom));
+  align-items: flex-start;
+  padding: max(24px, env(safe-area-inset-top)) 20px calc(24px + var(--safe-bottom));
 }
 
 .overlay--weigh-in .overlay-panel {
-  width: min(100%, 340px);
-  max-height: min(85dvh, 520px);
+  width: min(calc(100% - 8px), 320px);
+  max-height: min(85dvh, 560px);
   border-radius: 16px;
-  padding: 18px 16px 20px;
+  padding: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .overlay-title {
@@ -1362,48 +1364,76 @@ body {
 }
 
 /* Weigh-in overlay */
+.weigh-in-form {
+  padding: 22px 22px 20px;
+}
+
+.weigh-in-form .overlay-title {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.weigh-in-primary {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
 .weigh-in-label {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
-  margin: 12px 0 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  margin: 14px 0 8px;
+  line-height: 1.35;
+}
+
+.weigh-in-primary .weigh-in-label {
+  margin-top: 0;
+}
+
+.weigh-in-weight-field {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
 }
 
 .weigh-in-weight-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .weigh-in-weight-input {
-  flex: 1;
-  font-size: 28px;
+  width: 6.5ch;
+  min-width: 0;
+  font-size: 32px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
-  padding: 10px 14px;
-  min-height: 48px;
+  padding: 8px 10px;
+  min-height: 52px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg);
   color: var(--text);
   text-align: center;
 }
 
-.overlay--weigh-in .weigh-in-weight-input {
-  font-size: 24px;
-  min-height: 44px;
-  padding: 8px 12px;
+.weigh-in-primary .weigh-in-weight-input {
+  width: 7ch;
+  font-size: 36px;
+  min-height: 56px;
 }
 
 .weigh-in-detail-input {
-  flex: 1;
-  font-size: 18px;
+  width: 100%;
+  min-width: 0;
+  font-size: 17px;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
-  padding: 10px 14px;
+  padding: 10px 12px;
   min-height: 44px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1412,25 +1442,61 @@ body {
 }
 
 .weigh-in-unit {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text-muted);
   flex-shrink: 0;
+  padding-right: 2px;
+}
+
+.weigh-in-primary .weigh-in-unit {
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .weigh-in-error {
   font-size: 13px;
   color: #e07070;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
+  line-height: 1.4;
 }
 
 .weigh-in-waist-prompt {
   font-size: 13px;
   color: var(--accent);
-  margin: 8px 0;
+  margin: 12px 0 0;
+  line-height: 1.45;
+}
+
+.weigh-in-form .btn-ghost {
+  display: block;
+  margin: 14px 0 0;
+  padding: 0;
+  text-align: left;
 }
 
 .weigh-in-details {
-  margin-top: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.weigh-in-details .note-edit {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0;
+}
+
+.overlay--weigh-in .weigh-in-form .btn-primary,
+.overlay--weigh-in .weigh-in-form .btn-secondary {
+  margin-top: 16px;
+}
+
+.overlay--weigh-in .weigh-in-form .btn-secondary {
+  min-height: 44px;
+}
+
+.overlay--weigh-in .weigh-in-form .btn-primary {
+  min-height: 48px;
 }
 
 /* Body Composition screen */

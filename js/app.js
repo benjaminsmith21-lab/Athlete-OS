@@ -904,31 +904,35 @@ async function openWeighInOverlay(isEdit = false, measurementId = null) {
   state.pendingWeighInDate = editing?.date || null;
 
   overlayContent.innerHTML = `
-    <p class="overlay-title">Daily Weigh-In</p>
-    <label class="weigh-in-label" for="weigh-in-weight">Body weight in kilograms</label>
-    <div class="weigh-in-weight-row">
-      <input type="text" inputmode="decimal" id="weigh-in-weight" class="weigh-in-weight-input" value="${prefill}" aria-label="Body weight in kilograms">
-      <span class="weigh-in-unit">kg</span>
-    </div>
-    <p class="weigh-in-error hidden" id="weigh-in-error"></p>
-    ${waistPrompt}
-    <button type="button" class="btn-ghost" id="btn-toggle-details">${showDetails ? 'Hide details' : 'Add details'}</button>
-    <div class="weigh-in-details ${showDetails ? '' : 'hidden'}" id="weigh-in-details">
-      <label class="weigh-in-label" for="weigh-in-fat">Estimated body fat</label>
-      <div class="weigh-in-weight-row">
-        <input type="text" inputmode="decimal" id="weigh-in-fat" class="weigh-in-detail-input" value="${editing?.bodyFatPercent ?? ''}" placeholder="Optional" aria-label="Estimated body fat percentage">
-        <span class="weigh-in-unit">%</span>
+    <div class="weigh-in-form">
+      <p class="overlay-title">Daily Weigh-In</p>
+      <div class="weigh-in-primary">
+        <label class="weigh-in-label" for="weigh-in-weight">Body weight</label>
+        <div class="weigh-in-weight-field">
+          <input type="text" inputmode="decimal" id="weigh-in-weight" class="weigh-in-weight-input" value="${prefill}" aria-label="Body weight in kilograms">
+          <span class="weigh-in-unit">kg</span>
+        </div>
       </div>
-      <label class="weigh-in-label" for="weigh-in-waist">Waist</label>
-      <div class="weigh-in-weight-row">
-        <input type="text" inputmode="decimal" id="weigh-in-waist" class="weigh-in-detail-input" value="${editing?.waistCm ?? ''}" placeholder="Optional" aria-label="Waist in centimetres">
-        <span class="weigh-in-unit">cm</span>
+      <p class="weigh-in-error hidden" id="weigh-in-error"></p>
+      ${waistPrompt}
+      <button type="button" class="btn-ghost" id="btn-toggle-details">${showDetails ? 'Hide details' : 'Add details'}</button>
+      <div class="weigh-in-details ${showDetails ? '' : 'hidden'}" id="weigh-in-details">
+        <label class="weigh-in-label" for="weigh-in-fat">Estimated body fat</label>
+        <div class="weigh-in-weight-row">
+          <input type="text" inputmode="decimal" id="weigh-in-fat" class="weigh-in-detail-input" value="${editing?.bodyFatPercent ?? ''}" placeholder="Optional" aria-label="Estimated body fat percentage">
+          <span class="weigh-in-unit">%</span>
+        </div>
+        <label class="weigh-in-label" for="weigh-in-waist">Waist</label>
+        <div class="weigh-in-weight-row">
+          <input type="text" inputmode="decimal" id="weigh-in-waist" class="weigh-in-detail-input" value="${editing?.waistCm ?? ''}" placeholder="Optional" aria-label="Waist in centimetres">
+          <span class="weigh-in-unit">cm</span>
+        </div>
+        <label class="weigh-in-label" for="weigh-in-note">Note</label>
+        <textarea id="weigh-in-note" class="note-edit" placeholder="Optional">${escapeHtml(editing?.note || '')}</textarea>
       </div>
-      <label class="weigh-in-label" for="weigh-in-note">Note</label>
-      <textarea id="weigh-in-note" class="note-edit" placeholder="Optional">${escapeHtml(editing?.note || '')}</textarea>
+      <button type="button" class="btn-primary" id="btn-save-weigh-in">${editing ? 'Save Weigh-In' : 'Save Weigh-In'}</button>
+      <button type="button" class="btn-secondary" id="btn-cancel-weigh-in">Cancel</button>
     </div>
-    <button type="button" class="btn-primary" id="btn-save-weigh-in">${editing ? "Save Weigh-In" : 'Save Weigh-In'}</button>
-    <button type="button" class="btn-secondary" id="btn-cancel-weigh-in">Cancel</button>
   `;
   overlay.classList.add('overlay--weigh-in');
   overlay.classList.remove('hidden');
@@ -1012,10 +1016,12 @@ async function submitWeighIn(skipChecks = {}) {
 
 function openWeighInConfirm(message, onConfirm) {
   overlayContent.innerHTML = `
-    <p class="overlay-title">Confirm</p>
-    <p class="overlay-sub">${escapeHtml(message).replace(/\n/g, '<br>')}</p>
-    <button type="button" class="btn-primary" id="btn-confirm-weigh-in">Save anyway</button>
-    <button type="button" class="btn-secondary" id="btn-back-weigh-in">Go back</button>
+    <div class="weigh-in-form">
+      <p class="overlay-title">Confirm</p>
+      <p class="overlay-sub">${escapeHtml(message).replace(/\n/g, '<br>')}</p>
+      <button type="button" class="btn-primary" id="btn-confirm-weigh-in">Save anyway</button>
+      <button type="button" class="btn-secondary" id="btn-back-weigh-in">Go back</button>
+    </div>
   `;
   $('#btn-confirm-weigh-in').addEventListener('click', () => {
     closeOverlay();
