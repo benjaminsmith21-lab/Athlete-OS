@@ -477,15 +477,16 @@ function isBodyweightDialValue(text) {
 function renderDialRow(label, id, value, opts = {}) {
   const { min = 0, max = 999, step = 1, bw = false } = opts;
   const numVal = value === '' || value == null ? 0 : Number(value);
-  const displayVal =
-    bw && numVal <= 0 ? BODYWEIGHT_DIAL_LABEL : Number.isInteger(step) ? numVal : numVal;
+  const isBodyweightDisplay = bw && numVal <= 0;
+  const displayVal = isBodyweightDisplay ? BODYWEIGHT_DIAL_LABEL : Number.isInteger(step) ? numVal : numVal;
+  const valueClass = isBodyweightDisplay ? 'dial-value dial-value--bodyweight' : 'dial-value';
 
   return `
     <div class="adjust-row">
       <label>${label}</label>
       <div class="dial" data-id="${id}" data-min="${min}" data-max="${max}" data-step="${step}" data-bw="${bw ? '1' : '0'}">
         <button type="button" class="dial-btn dial-minus" aria-label="Decrease ${label}">−</button>
-        <span class="dial-value" id="${id}">${displayVal === BODYWEIGHT_DIAL_LABEL ? BODYWEIGHT_DIAL_LABEL : displayVal}</span>
+        <span class="${valueClass}" id="${id}">${displayVal === BODYWEIGHT_DIAL_LABEL ? BODYWEIGHT_DIAL_LABEL : displayVal}</span>
         <button type="button" class="dial-btn dial-plus" aria-label="Increase ${label}">+</button>
       </div>
     </div>`;
@@ -521,10 +522,13 @@ function bindDials(container, exercise = null) {
     function setVal(v) {
       if (isBw && v <= 0) {
         valueEl.textContent = BODYWEIGHT_DIAL_LABEL;
+        valueEl.classList.add('dial-value--bodyweight');
       } else if (Number.isInteger(step)) {
         valueEl.textContent = Math.round(v);
+        valueEl.classList.remove('dial-value--bodyweight');
       } else {
         valueEl.textContent = String(Math.round(v * 2) / 2);
+        valueEl.classList.remove('dial-value--bodyweight');
       }
       if (dial.dataset.id === 'adj-duration') {
         syncTimedDurationFromDial(exercise);
@@ -678,7 +682,7 @@ function renderTimedCountdownBlock(exercise, fields) {
   const progress =
     phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
 
-  let phaseLabel = 'Ready when you are';
+  let phaseLabel = '';
   let displayTime = formatDurationClock(targetSeconds);
   if (phase === 'prep') {
     phaseLabel = 'Get ready…';
@@ -693,13 +697,16 @@ function renderTimedCountdownBlock(exercise, fields) {
 
   const startDisabled = phase === 'prep' || phase === 'running' ? 'disabled' : '';
   const startLabel = phase === 'done' ? 'Restart Timer' : 'Start Timer';
+  const labelHtml = phaseLabel
+    ? `<p class="timed-countdown-label">${phaseLabel}</p>`
+    : '';
 
   return `
     <div class="timed-countdown" id="timed-countdown">
       <div class="timed-countdown-ring" style="--timed-progress: ${progress}%">
         <span class="timed-countdown-time">${displayTime}</span>
       </div>
-      <p class="timed-countdown-label">${phaseLabel}</p>
+      ${labelHtml}
       <button type="button" class="btn-secondary timed-countdown-start" id="btn-start-duration-timer" ${startDisabled}>
         ${startLabel}
       </button>
@@ -1054,6 +1061,23 @@ function renderActiveExerciseBody(
   const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
   const controlsHtml = buildExerciseControls(exercise, fields);
+  const exerciseName = escapeHtml(formatExerciseName(exercise.name));
+  const isTimed = exercise.type === 'timed';
+  const cardClass = isTimed ? 'exercise-card exercise-card--timed' : 'exercise-card exercise-card--name-center';
+  const cardBody = isTimed
+    ? `
+            <h2 class="exercise-name exercise-name--header">${exerciseName}</h2>
+            <div class="exercise-focus">
+              ${renderTimedCountdownBlock(exercise, fields)}
+            </div>
+            <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+          `
+    : `
+            <div class="exercise-focus">
+              <h2 class="exercise-name">${exerciseName}</h2>
+            </div>
+            <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+          `;
 
   return `
     <div class="active-exercise-layout">
@@ -1066,12 +1090,8 @@ function renderActiveExerciseBody(
 
       <div class="exercise-swipe-stack">
         <div class="exercise-swipe-card" id="exercise-swipe-card">
-          <div class="exercise-card">
-            <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-            <div class="exercise-focus">
-              ${exercise.type === 'timed' ? renderTimedCountdownBlock(exercise, fields) : ''}
-            </div>
-            <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+          <div class="${cardClass}">
+            ${cardBody}
           </div>
         </div>
       </div>

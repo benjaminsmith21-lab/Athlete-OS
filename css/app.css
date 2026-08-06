@@ -460,6 +460,29 @@ body {
   box-sizing: border-box;
 }
 
+.exercise-card--name-center {
+  justify-content: center;
+}
+
+.exercise-card--name-center .exercise-focus {
+  flex: 1;
+  justify-content: center;
+}
+
+.exercise-card--name-center .exercise-name {
+  margin: 0;
+}
+
+.exercise-card--timed .exercise-name--header {
+  margin: 0 0 4px;
+  flex-shrink: 0;
+}
+
+.exercise-card--timed .exercise-focus {
+  flex: 1;
+  justify-content: center;
+}
+
 .exercise-focus {
   flex: 1;
   display: flex;
@@ -900,12 +923,21 @@ body {
 }
 
 .dial-value {
+  width: 56px;
   min-width: 56px;
+  max-width: 56px;
   text-align: center;
   font-family: var(--mono);
   font-size: 20px;
   font-weight: 600;
   color: var(--accent);
+}
+
+.dial-value--bodyweight {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 
 .adjust-row .dial {
