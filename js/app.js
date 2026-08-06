@@ -152,15 +152,29 @@ const state = {
   pendingBackupMode: 'merge',
   garminImportFlash: null,
   backupBanner: null,
-  activeExerciseIndex: null
+  activeExerciseIndex: null,
+  lastRenderedExerciseId: null,
+  durationTimerPhase: 'idle',
+  durationTimerRemaining: 0,
+  durationTimerTotal: 0,
+  durationTimerTargetSeconds: null,
+  durationTimerSoundPlayed: false
 };
 
 let restTimerInterval = null;
 let exerciseTimerInterval = null;
+let durationTimerInterval = null;
 let restCompleteAudio = null;
 
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
 const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
+const DURATION_PREP_SECONDS = 5;
+
+const WORKOUT_COMPLETE_SOUNDS = [
+  './assets/audio/workout%20complete/mission-accomplished.mp3',
+  './assets/audio/workout%20complete/red-alert2-victory.mp3',
+  './assets/audio/workout%20complete/mission-accomplished-well-done-toy-story-disney-sergeant-r-lee-ermey-good-job-success-complete.mp3'
+];
 
 const $ = (sel) => document.querySelector(sel);
 const screenRoot = $('#screen-root');
@@ -273,11 +287,47 @@ function maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed) {
   }
 }
 
+function playTimedEndSound() {
+  try {
+    const audio = new Audio(REST_COMPLETE_SOUND_URL);
+    audio.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+function playRandomWorkoutCompleteSound() {
+  if (!WORKOUT_COMPLETE_SOUNDS.length) return;
+  const url = WORKOUT_COMPLETE_SOUNDS[Math.floor(Math.random() * WORKOUT_COMPLETE_SOUNDS.length)];
+  try {
+    const audio = new Audio(url);
+    audio.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+function resetDurationTimer() {
+  state.durationTimerPhase = 'idle';
+  state.durationTimerRemaining = 0;
+  state.durationTimerTotal = 0;
+  state.durationTimerSoundPlayed = false;
+}
+
+function clearDurationTimer() {
+  if (durationTimerInterval) {
+    clearInterval(durationTimerInterval);
+    durationTimerInterval = null;
+  }
+  resetDurationTimer();
+}
+
 function clearExerciseTimer() {
   if (exerciseTimerInterval) {
     clearInterval(exerciseTimerInterval);
     exerciseTimerInterval = null;
   }
+  clearDurationTimer();
 }
 
 function formatElapsed(totalSeconds) {
@@ -479,19 +529,28 @@ function bindDials(container) {
 }
 
 function showSetsField(exercise) {
-  return isStructuredExercise(exercise);
+  return isStructuredExercise(exercise) && !usesStandardRepDials(exercise);
 }
 
 function showRepsField(exercise) {
-  return ['weighted_reps', 'reps'].includes(exercise.type);
+  return ['weighted_reps', 'reps'].includes(exercise.type) && !usesStandardRepDials(exercise);
 }
 
 function showWeightField(exercise) {
+  if (usesStandardRepDials(exercise)) return false;
   return ['weighted_reps', 'reps', 'carry'].includes(exercise.type) || exercise.weight != null;
 }
 
+function isBodyweightRepsExercise(exercise) {
+  return exercise.type === 'reps' && exercise.weight == null;
+}
+
+function usesStandardRepDials(exercise) {
+  return ['weighted_reps', 'reps'].includes(exercise.type);
+}
+
 function showDurationField(exercise) {
-  return exercise.type === 'timed';
+  return false;
 }
 
 function showDistanceField(exercise) {
@@ -505,33 +564,40 @@ function showRunDurationField(exercise) {
 function buildAdjustmentPanel(exercise, fields) {
   const unit = state.settings?.weightUnit || 'kg';
   const wStep = weightStep(unit);
-  const isBw = fields.weightLabel === 'bodyweight' || (!exercise.weight && showWeightField(exercise));
 
   let html = '<div class="adjust-panel" id="adjust-panel">';
 
-  if (showSetsField(exercise)) {
+  if (usesStandardRepDials(exercise)) {
     html += renderDialRow('Sets', 'adj-sets', fields.sets, { min: 1, max: 20, step: 1 });
-  }
-
-  if (showRepsField(exercise)) {
     html += renderDialRow('Reps', 'adj-reps', fields.reps, { min: 1, max: 50, step: 1 });
-  }
+    if (!isBodyweightRepsExercise(exercise)) {
+      const isBw = fields.weightLabel === 'bodyweight' || !exercise.weight;
+      html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
+        min: 0,
+        max: unit === 'lbs' ? 440 : 200,
+        step: wStep,
+        bw: isBw
+      });
+    }
+  } else {
+    const isBw = fields.weightLabel === 'bodyweight' || (!exercise.weight && showWeightField(exercise));
 
-  if (showWeightField(exercise)) {
-    html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
-      min: 0,
-      max: unit === 'lbs' ? 440 : 200,
-      step: wStep,
-      bw: isBw
-    });
-  }
+    if (showSetsField(exercise)) {
+      html += renderDialRow('Sets', 'adj-sets', fields.sets, { min: 1, max: 20, step: 1 });
+    }
 
-  if (showDurationField(exercise)) {
-    html += renderDialRow(`Duration (${exercise.durationUnit || 's'})`, 'adj-duration', fields.duration, {
-      min: 5,
-      max: 300,
-      step: 5
-    });
+    if (showRepsField(exercise)) {
+      html += renderDialRow('Reps', 'adj-reps', fields.reps, { min: 1, max: 50, step: 1 });
+    }
+
+    if (showWeightField(exercise)) {
+      html += renderDialRow(`Weight (${unit})`, 'adj-weight', fields.weight, {
+        min: 0,
+        max: unit === 'lbs' ? 440 : 200,
+        step: wStep,
+        bw: isBw
+      });
+    }
   }
 
   if (showDistanceField(exercise)) {
@@ -560,6 +626,131 @@ function renderNoteButton(note) {
     return `<button type="button" class="exercise-note-link has-note" id="btn-exercise-note" title="${escapeHtml(note)}">${escapeHtml(note)}</button>`;
   }
   return `<button type="button" class="exercise-note-link" id="btn-exercise-note">+ note</button>`;
+}
+
+function formatDurationClock(totalSeconds) {
+  const s = Math.max(0, Math.ceil(totalSeconds));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function getTimedExerciseSeconds(exercise, fields) {
+  const fromFields = fields?.duration;
+  if (fromFields != null && fromFields !== '') return Math.round(Number(fromFields));
+  if (exercise.duration != null) return Math.round(exercise.duration);
+  return 20;
+}
+
+function renderTimedCountdownBlock(exercise, fields) {
+  const targetSeconds = state.durationTimerTargetSeconds ?? getTimedExerciseSeconds(exercise, fields);
+  const phase = state.durationTimerPhase;
+  const remaining = state.durationTimerRemaining;
+  const total = state.durationTimerTotal || targetSeconds;
+  const progress =
+    phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
+
+  let phaseLabel = 'Ready when you are';
+  let displayTime = formatDurationClock(targetSeconds);
+  if (phase === 'prep') {
+    phaseLabel = 'Get ready…';
+    displayTime = String(Math.ceil(remaining));
+  } else if (phase === 'running') {
+    phaseLabel = 'Hang time';
+    displayTime = formatDurationClock(remaining);
+  } else if (phase === 'done') {
+    phaseLabel = "Time's up";
+    displayTime = '0:00';
+  }
+
+  const startDisabled = phase === 'prep' || phase === 'running' ? 'disabled' : '';
+  const startLabel = phase === 'done' ? 'Restart Timer' : 'Start Timer';
+
+  return `
+    <div class="timed-countdown" id="timed-countdown">
+      <div class="timed-countdown-ring" style="--timed-progress: ${progress}%">
+        <span class="timed-countdown-time">${displayTime}</span>
+      </div>
+      <p class="timed-countdown-label">${phaseLabel}</p>
+      <button type="button" class="btn-secondary timed-countdown-start" id="btn-start-duration-timer" ${startDisabled}>
+        ${startLabel}
+      </button>
+    </div>
+  `;
+}
+
+function refreshTimedCountdownView(exercise, fields) {
+  const block = $('#timed-countdown');
+  if (block) {
+    block.outerHTML = renderTimedCountdownBlock(exercise, fields);
+    bindDurationTimerControls(exercise, fields);
+  }
+}
+
+function maybePlayTimedEndSound(remaining, totalSeconds) {
+  if (state.durationTimerSoundPlayed) return;
+  const triggerAt =
+    totalSeconds < REST_COMPLETE_SOUND_LEAD_SECONDS
+      ? totalSeconds
+      : REST_COMPLETE_SOUND_LEAD_SECONDS;
+  if (remaining === triggerAt) {
+    state.durationTimerSoundPlayed = true;
+    playTimedEndSound();
+  }
+}
+
+function startDurationTimerRunning(exercise, fields) {
+  const seconds = getTimedExerciseSeconds(exercise, fields);
+  state.durationTimerPhase = 'running';
+  state.durationTimerRemaining = seconds;
+  state.durationTimerTotal = seconds;
+  state.durationTimerTargetSeconds = seconds;
+  state.durationTimerSoundPlayed = false;
+  refreshTimedCountdownView(exercise, fields);
+
+  durationTimerInterval = setInterval(() => {
+    state.durationTimerRemaining -= 1;
+    maybePlayTimedEndSound(state.durationTimerRemaining, state.durationTimerTotal);
+    refreshTimedCountdownView(exercise, fields);
+
+    if (state.durationTimerRemaining <= 0) {
+      clearInterval(durationTimerInterval);
+      durationTimerInterval = null;
+      state.durationTimerPhase = 'done';
+      state.durationTimerRemaining = 0;
+      refreshTimedCountdownView(exercise, fields);
+      const card = $('#exercise-swipe-card');
+      card?.classList.add('timed-countdown-flash');
+      setTimeout(() => card?.classList.remove('timed-countdown-flash'), 600);
+    }
+  }, 1000);
+}
+
+function startDurationTimerPrep(exercise, fields) {
+  clearDurationTimer();
+  unlockRestCompleteSound();
+  state.durationTimerPhase = 'prep';
+  state.durationTimerRemaining = DURATION_PREP_SECONDS;
+  state.durationTimerTotal = DURATION_PREP_SECONDS;
+  refreshTimedCountdownView(exercise, fields);
+
+  durationTimerInterval = setInterval(() => {
+    state.durationTimerRemaining -= 1;
+    refreshTimedCountdownView(exercise, fields);
+
+    if (state.durationTimerRemaining <= 0) {
+      clearInterval(durationTimerInterval);
+      durationTimerInterval = null;
+      startDurationTimerRunning(exercise, fields);
+    }
+  }, 1000);
+}
+
+function bindDurationTimerControls(exercise, fields) {
+  $('#btn-start-duration-timer')?.addEventListener('click', () => {
+    if (state.durationTimerPhase === 'prep' || state.durationTimerPhase === 'running') return;
+    startDurationTimerPrep(exercise, fields);
+  });
 }
 
 function formatNextExercisePreview(exercise, prev, unit) {
@@ -594,9 +785,10 @@ function formatNextExercisePreview(exercise, prev, unit) {
     : '';
 
   return `
-    <div class="rest-next">
-      <p class="rest-next-title">Up next: <strong>${escapeHtml(name)}</strong></p>
-      <p class="rest-next-detail">${escapeHtml(detail)}</p>
+    <div class="rest-next rest-next--stacked">
+      <p class="rest-next-kicker">Up next</p>
+      <p class="rest-next-name">${escapeHtml(name)}</p>
+      <p class="rest-next-rx">${escapeHtml(detail)}</p>
       ${noteHtml}
     </div>
   `;
@@ -667,10 +859,13 @@ function renderExerciseDots(exercises, setLogs, mission, activeIndex) {
   `;
 }
 
-function bindExerciseActions(exercise, exercises, exerciseIndex) {
+function bindExerciseActions(exercise, exercises, exerciseIndex, fields) {
   bindDials(screenRoot);
   bindNoteButton();
   bindExerciseSwipe(exercises, exerciseIndex);
+  if (exercise.type === 'timed') {
+    bindDurationTimerControls(exercise, fields);
+  }
 
   $('#btn-complete-exercise')?.addEventListener('click', async () => {
     unlockRestCompleteSound();
@@ -704,7 +899,7 @@ function bindExerciseActions(exercise, exercises, exerciseIndex) {
     state.setLogs = await getSetLogsForMission(state.mission.id);
 
     if (areRequiredExercisesDone(state.mission, state.setLogs)) {
-      renderComplete(false);
+      await afterExerciseComplete(true);
       return;
     }
 
@@ -715,6 +910,7 @@ function bindExerciseActions(exercise, exercises, exerciseIndex) {
 
 async function navigateActiveExercise(index, exercises) {
   if (index < 0 || index >= exercises.length) return;
+  clearDurationTimer();
   state.activeExerciseIndex = index;
   state.mission.currentExerciseIndex = index;
   state.mission = await saveMission(state.mission);
@@ -823,27 +1019,31 @@ function renderActiveExerciseBody(
   state.exerciseNoteDraft = fields.notes || '';
 
   return `
-    <div class="progress-bar-wrap">
-      <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
-      <p class="progress-label">${completedCount} of ${totalExercises} complete · Exercise ${exIndex + 1}</p>
-    </div>
+    <div class="active-exercise-layout">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <p class="progress-label">${completedCount} of ${totalExercises} complete · Exercise ${exIndex + 1}</p>
+      </div>
 
-    ${renderTimerStrip()}
+      ${renderTimerStrip()}
 
-    <div class="exercise-swipe-stack">
-      <div class="exercise-swipe-card" id="exercise-swipe-card">
-        <div class="exercise-card">
-          <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
-          <p class="exercise-rx">${escapeHtml(rx)}</p>
-          <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
-          ${renderPreviousBlock(prev, historyRows, hints)}
+      <div class="exercise-swipe-stack">
+        <div class="exercise-swipe-card" id="exercise-swipe-card">
+          <div class="exercise-card">
+            <h2 class="exercise-name">${escapeHtml(formatExerciseName(exercise.name))}</h2>
+            <p class="exercise-rx">${escapeHtml(rx)}</p>
+            ${exercise.type === 'timed' ? renderTimedCountdownBlock(exercise, fields) : ''}
+            <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
+            ${renderPreviousBlock(prev, historyRows, hints)}
+          </div>
         </div>
       </div>
-    </div>
-    <p class="exercise-swipe-hint">Swipe the card to move between exercises</p>
-    ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
+      ${mission ? renderExerciseDots(exercises, setLogs, mission, exIndex) : ''}
 
-    ${buildAdjustmentPanel(exercise, fields)}
+      <div class="adjust-panel-slot">
+        ${buildAdjustmentPanel(exercise, fields)}
+      </div>
+    </div>
   `;
 }
 
@@ -880,11 +1080,17 @@ function collectActualFromForm(exercise) {
   if (weight != null && weight > 0) {
     actual.weight = weight;
     actual.weightUnit = unit;
+  } else if (usesStandardRepDials(exercise) && isBodyweightRepsExercise(exercise)) {
+    actual.weightLabel = 'bodyweight';
   } else if (showWeightField(exercise) && !exercise.weight) {
     actual.weightLabel = 'bodyweight';
   }
   if (duration != null) {
     actual.duration = Math.round(duration);
+    actual.durationUnit = exercise.durationUnit || 's';
+  } else if (exercise.type === 'timed') {
+    const timedSeconds = state.durationTimerTargetSeconds ?? getTimedExerciseSeconds(exercise, null);
+    actual.duration = timedSeconds;
     actual.durationUnit = exercise.durationUnit || 's';
   }
   if (distance != null) {
@@ -915,6 +1121,7 @@ function renderPreviousBlock(prev, historyRows = [], hints = []) {
 async function afterExerciseComplete(done) {
   clearExerciseTimer();
   if (done) {
+    playRandomWorkoutCompleteSound();
     renderComplete(false);
     return;
   }
@@ -1178,12 +1385,12 @@ async function buildMissionBriefCardHtml(blueprint, exerciseCount, completed, ac
   const dayHeading = formatMissionDayHeading(new Date());
   const duration = await getMissionDurationEstimate(blueprint.dayOfWeek, blueprint.operation, exerciseCount);
   const objectiveLabel = exerciseCount === 1 ? 'objective' : 'objectives';
+  const operationColor = op.color || '#6b8f4e';
 
   return `
     <div class="mission-card mission-brief">
-      <span class="operation-badge" style="${op.style}">${escapeHtml(op.label.toUpperCase())}</span>
       <p class="mission-brief-kicker">Today's Mission</p>
-      <h2 class="mission-brief-operation">${escapeHtml(op.label.toUpperCase())}</h2>
+      <h2 class="mission-brief-operation" style="color: ${operationColor}">${escapeHtml(op.label.toUpperCase())}</h2>
       <p class="mission-brief-date">${escapeHtml(dayHeading)}</p>
       <div class="mission-brief-block">
         <p class="mission-brief-label">Role</p>
@@ -1845,9 +2052,7 @@ function renderCentre() {
     const bodyStatusHtml = await buildBodyStatusCardHtml();
     const missionBriefHtml = await buildMissionBriefCardHtml(state.blueprint, exerciseCount, completed, active);
     const reviewDue = isReviewWeek(week);
-    const reviewBadge = reviewDue
-      ? '<span class="review-badge">Review available</span>'
-      : '';
+    const reviewLinkSuffix = reviewDue ? ' (available)' : '';
     const lastBackupLabel = formatLastBackupLabel(state.settings?.lastBackupExportAt);
     const backupLineHtml = `<p class="centre-backup-line">Last backup: ${escapeHtml(lastBackupLabel)}</p>`;
     const weekStripHtml = renderWeekStripHtml(weekStrip);
@@ -1867,7 +2072,10 @@ function renderCentre() {
           ${buildBackupBannerHtml()}
           <p class="section-label">Active Campaign</p>
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
-          <p class="campaign-meta">Week ${week} of ${state.campaign.durationWeeks} ${reviewBadge}</p>
+          <p class="campaign-meta">
+            Week ${week} of ${state.campaign.durationWeeks}
+            <button type="button" class="campaign-meta-link" id="btn-campaign-review">· Campaign Review${reviewLinkSuffix}</button>
+          </p>
 
           ${weekStripHtml}
 
@@ -1881,7 +2089,6 @@ function renderCentre() {
               ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
               ${active && !completed ? '<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">Abort Mission</button>' : ''}
               ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS Workout</button>' : ''}
-              <button type="button" class="btn-secondary" id="btn-campaign-review">Campaign Review</button>
             </div>
 
             ${bodyStatusHtml}
@@ -1987,7 +2194,6 @@ async function renderSettings() {
         <div class="settings-group">
           <p class="settings-group-title">Rest Timer (between exercises)</p>
           ${renderDialRow('Seconds', 'setting-rest', s.restTimerSeconds, { min: 0, max: 180, step: 15 })}
-          <p class="settings-hint">Default 60s. Set to 0 to disable.</p>
           <div class="settings-toggle-row">
             <span class="settings-toggle-label">Show next exercise during rest</span>
             <button type="button" class="toggle-switch ${s.showNextExerciseOnRest ? 'on' : ''}" id="toggle-next-exercise" aria-pressed="${s.showNextExerciseOnRest}">
@@ -2339,17 +2545,20 @@ function renderBriefing() {
   state.screen = 'briefing';
   setHeader('Briefing');
 
-  const op = operationStyle(state.blueprint.operation);
   const unit = state.settings?.weightUnit || 'kg';
+  const exerciseCount = state.blueprint.exercises.length;
 
-  Promise.all(
-    state.blueprint.exercises.map(async (ex) => {
-      const history = await getExerciseHistory(ex.id, 3);
-      const hints = getProgressionHints(ex, history);
-      return { ex, hints };
-    })
-  ).then((exerciseData) => {
-    CoachService.getBriefingNote(state.campaign).then((note) => {
+  Promise.all([
+    Promise.all(
+      state.blueprint.exercises.map(async (ex) => {
+        const history = await getExerciseHistory(ex.id, 3);
+        const hints = getProgressionHints(ex, history);
+        return { ex, hints };
+      })
+    ),
+    CoachService.getBriefingNote(state.campaign),
+    buildMissionBriefCardHtml(state.blueprint, exerciseCount, false, false)
+  ]).then(([exerciseData, note, missionBriefHtml]) => {
       const exerciseItems = exerciseData
         .map(({ ex, hints }) => {
           const rx = formatPrescriptionForDisplay(ex, unit);
@@ -2367,11 +2576,9 @@ function renderBriefing() {
       screenRoot.innerHTML = `
         <div class="screen">
           <div class="screen-scroll">
-            <span class="operation-badge" style="${op.style}">${op.label}</span>
-            <h1 class="campaign-title">${escapeHtml(state.blueprint.dayName)} Mission</h1>
-            <p class="campaign-meta">${escapeHtml(state.blueprint.operation)} front</p>
-
             <div class="identity-block">"${escapeHtml(note)}"</div>
+
+            ${missionBriefHtml}
 
             <p class="section-label">Mission Loadout</p>
             <ul class="exercise-list">${exerciseItems}</ul>
@@ -2397,13 +2604,11 @@ function renderBriefing() {
         renderActive();
       });
       $('#btn-back-centre').addEventListener('click', () => renderCentre());
-    });
   });
 }
 
 async function renderActiveAtIndex(index) {
   clearRestTimer();
-  clearExerciseTimer();
 
   const exercises = getActiveExercises(state.mission);
   if (!exercises.length || index < 0 || index >= exercises.length) {
@@ -2413,8 +2618,18 @@ async function renderActiveAtIndex(index) {
 
   const exercise = exercises[index];
   if (isChecklistExercise(exercise)) {
+    clearExerciseTimer();
     await renderChecklistItem(exercise, exercises);
     return;
+  }
+
+  if (state.lastRenderedExerciseId !== exercise.id) {
+    clearDurationTimer();
+    state.lastRenderedExerciseId = exercise.id;
+  }
+  if (exerciseTimerInterval) {
+    clearInterval(exerciseTimerInterval);
+    exerciseTimerInterval = null;
   }
 
   state.activeExerciseIndex = index;
@@ -2448,15 +2663,16 @@ async function renderActiveAtIndex(index) {
   const screenBody = $('.screen-body');
   const screenFooter = $('.screen-footer');
   if (screenBody && screenFooter && state.screen === 'active') {
+    screenBody.classList.add('screen-body--active');
     screenBody.innerHTML = bodyHtml;
     screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
-    bindExerciseActions(exercise, exercises, index);
+    bindExerciseActions(exercise, exercises, index, fields);
     return;
   }
 
   screenRoot.innerHTML = `
     <div class="screen">
-      <div class="screen-body">
+      <div class="screen-body screen-body--active">
         ${bodyHtml}
       </div>
       <div class="screen-footer">
@@ -2465,11 +2681,13 @@ async function renderActiveAtIndex(index) {
     </div>
   `;
 
-  bindExerciseActions(exercise, exercises, index);
+  bindExerciseActions(exercise, exercises, index, fields);
 }
 
 async function renderActive() {
   clearRestTimer();
+  clearExerciseTimer();
+  state.lastRenderedExerciseId = null;
   state.screen = 'active';
   setHeader('Active Mission');
 
@@ -2544,7 +2762,7 @@ function renderChecklistActive(exercises) {
     });
   });
 
-  $('#btn-finish-checklist').addEventListener('click', () => renderComplete(false));
+  $('#btn-finish-checklist').addEventListener('click', () => afterExerciseComplete(true));
 }
 
 async function renderChecklistItem(exercise, exercises) {
@@ -2565,7 +2783,7 @@ async function renderChecklistItem(exercise, exercises) {
 
   screenRoot.innerHTML = `
     <div class="screen">
-      <div class="screen-body">
+      <div class="screen-body screen-body--active">
         ${renderActiveExerciseBody(exercise, prev, fields, exIndex, totalExercises, rx, historyRows, hints, completedCount, exercises, state.setLogs, state.mission)}
       </div>
       <div class="screen-footer">
@@ -2574,7 +2792,7 @@ async function renderChecklistItem(exercise, exercises) {
     </div>
   `;
 
-  bindExerciseActions(exercise, exercises, exIndex);
+  bindExerciseActions(exercise, exercises, exIndex, fields);
 }
 
 async function renderComplete(alreadyDone = false) {

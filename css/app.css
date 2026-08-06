@@ -133,6 +133,34 @@ body {
   min-height: 0;
 }
 
+.screen-body--active {
+  justify-content: flex-start;
+}
+
+.active-exercise-layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+.adjust-panel-slot {
+  min-height: 168px;
+  flex-shrink: 0;
+}
+
+.campaign-meta-link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+}
+
 .screen-footer {
   padding-top: 16px;
   flex-shrink: 0;
@@ -422,11 +450,11 @@ body {
   border-radius: 12px;
   padding: 24px 20px;
   text-align: center;
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  min-height: 280px;
+  justify-content: flex-start;
+  min-height: 220px;
 }
 
 .exercise-name {
@@ -488,11 +516,12 @@ body {
 }
 
 .adjust-panel {
-  margin-top: 12px;
+  margin-top: 0;
   padding: 12px;
   background: var(--bg-elevated);
   border-radius: 8px;
   text-align: left;
+  min-height: 144px;
 }
 
 .adjust-panel.hidden {
@@ -1190,11 +1219,42 @@ body {
 .rest-next {
   width: 100%;
   max-width: 280px;
-  margin-top: 12px;
+  margin: 12px auto 0;
   padding: 12px 14px;
   background: var(--bg-elevated);
   border-radius: 8px;
-  text-align: left;
+  text-align: center;
+}
+
+.rest-next--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.rest-next-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.rest-next-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.rest-next-rx {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+  font-family: var(--mono);
 }
 
 .rest-next-title {
@@ -2138,11 +2198,64 @@ body {
   opacity: 0;
 }
 
-.exercise-swipe-hint {
-  margin: 0 0 10px;
-  font-size: 11px;
+.timed-countdown {
+  margin: 12px 0 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.timed-countdown-ring {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) var(--timed-progress, 0%), var(--bg-elevated) 0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.timed-countdown-ring::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--bg-card);
+}
+
+.timed-countdown-time {
+  position: relative;
+  z-index: 1;
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.timed-countdown-label {
+  margin: 0;
+  font-size: 13px;
   color: var(--text-muted);
-  text-align: center;
+}
+
+.timed-countdown-start {
+  margin-top: 4px;
+}
+
+.exercise-swipe-card.timed-countdown-flash {
+  animation: timed-flash 0.6s ease;
+}
+
+@keyframes timed-flash {
+  0%,
+  100% {
+    box-shadow: none;
+  }
+  50% {
+    box-shadow: 0 0 0 3px var(--accent);
+  }
 }
 
 .exercise-dots {

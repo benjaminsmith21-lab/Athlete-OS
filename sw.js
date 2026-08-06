@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v20';
+const CACHE_NAME = 'athlete-os-v21';
 
 const ASSETS = [
   './',
@@ -29,6 +29,9 @@ const ASSETS = [
   './js/services/backupSnapshot.js',
   './js/services/backupScheduler.js',
   './assets/audio/rest-complete.wav',
+  './assets/audio/workout%20complete/mission-accomplished.mp3',
+  './assets/audio/workout%20complete/red-alert2-victory.mp3',
+  './assets/audio/workout%20complete/mission-accomplished-well-done-toy-story-disney-sergeant-r-lee-ermey-good-job-success-complete.mp3',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

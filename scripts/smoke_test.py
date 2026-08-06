@@ -36,6 +36,9 @@ REQUIRED_FILES = [
     'js/services/backupSnapshot.js',
     'js/services/backupScheduler.js',
     'assets/audio/rest-complete.wav',
+    'assets/audio/workout complete/mission-accomplished.mp3',
+    'assets/audio/workout complete/red-alert2-victory.mp3',
+    'assets/audio/workout complete/mission-accomplished-well-done-toy-story-disney-sergeant-r-lee-ermey-good-job-success-complete.mp3',
     'icons/icon-192.png',
     'icons/icon-512.png',
 ]
@@ -63,6 +66,8 @@ def test_service_worker_cache():
     assert 'backupSnapshot.js' in text
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
+    assert 'workout%20complete/mission-accomplished.mp3' in text
+    assert 'athlete-os-v21' in text
     assert 'datetime.js' in text
 
 def test_manifest():
