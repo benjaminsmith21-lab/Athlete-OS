@@ -1,5 +1,5 @@
 const DB_NAME = 'athlete-os';
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 
 export const STORE_KEY_PATHS = {
   campaigns: 'id',
@@ -12,11 +12,18 @@ export const STORE_KEY_PATHS = {
   dailyHealth: 'localDate',
   garminActivities: 'sourceActivityId',
   integrationSyncState: 'integration',
-  backupSnapshots: 'id'
+  backupSnapshots: 'id',
+  exerciseLibrary: 'id'
 };
 
 const STORES = {
-  campaigns: { keyPath: 'id' },
+  campaigns: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'status', keyPath: 'status' },
+      { name: 'updatedAt', keyPath: 'updatedAt' }
+    ]
+  },
   weeklyBlueprints: { keyPath: 'id', indexes: [{ name: 'campaignId', keyPath: 'campaignId' }, { name: 'dayOfWeek', keyPath: 'dayOfWeek' }] },
   missions: { keyPath: 'id', indexes: [{ name: 'date', keyPath: 'date' }, { name: 'status', keyPath: 'status' }] },
   setLogs: { keyPath: 'id', indexes: [{ name: 'missionId', keyPath: 'missionId' }, { name: 'exerciseId', keyPath: 'exerciseId' }] },
@@ -42,6 +49,15 @@ const STORES = {
   backupSnapshots: {
     keyPath: 'id',
     indexes: [{ name: 'createdAt', keyPath: 'createdAt' }]
+  },
+  exerciseLibrary: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'nameNormalized', keyPath: 'nameNormalized' },
+      { name: 'category', keyPath: 'category' },
+      { name: 'trackingType', keyPath: 'trackingType' },
+      { name: 'active', keyPath: 'active' }
+    ]
   }
 };
 
@@ -55,13 +71,23 @@ export function openDB() {
       request.onsuccess = () => resolve(request.result);
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        const tx = event.target.transaction;
         for (const [name, config] of Object.entries(STORES)) {
+          let store;
           if (!db.objectStoreNames.contains(name)) {
-            const store = db.createObjectStore(name, { keyPath: config.keyPath });
+            store = db.createObjectStore(name, { keyPath: config.keyPath });
             (config.indexes || []).forEach((idx) => {
               const options = idx.unique ? { unique: true } : {};
               store.createIndex(idx.name, idx.keyPath, options);
             });
+          } else if (config.indexes?.length) {
+            store = tx.objectStore(name);
+            for (const idx of config.indexes) {
+              if (!store.indexNames.contains(idx.name)) {
+                const options = idx.unique ? { unique: true } : {};
+                store.createIndex(idx.name, idx.keyPath, options);
+              }
+            }
           }
         }
       };

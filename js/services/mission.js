@@ -1,5 +1,5 @@
 import { get, getAll, put, remove, generateId, todayDateString } from '../db.js';
-import { CAMPAIGN_ID } from '../seed/blueprint-v1.js';
+import { getActiveCampaignId } from './campaign.js';
 
 export const MISSION_STATUS = {
   READY: 'ready',
@@ -19,13 +19,14 @@ export const MISSION_RATINGS = {
 
 export async function getOrCreateTodayMission(blueprint) {
   const date = todayDateString();
+  const campaignId = blueprint.campaignId || (await getActiveCampaignId());
   const missions = await getAll('missions');
-  let mission = missions.find((m) => m.date === date && m.campaignId === CAMPAIGN_ID);
+  let mission = missions.find((m) => m.date === date && m.campaignId === campaignId);
 
   if (!mission) {
     mission = {
       id: generateId('mission'),
-      campaignId: CAMPAIGN_ID,
+      campaignId,
       blueprintId: blueprint.id,
       date,
       dayOfWeek: blueprint.dayOfWeek,
@@ -312,6 +313,8 @@ export function getExerciseTotalSets(exercise) {
     case 'weighted_reps':
     case 'reps':
     case 'timed':
+    case 'weighted_timed':
+    case 'weighted_distance':
       return exercise.sets || 1;
     case 'distance':
     case 'carry':
@@ -325,11 +328,11 @@ export function getExerciseTotalSets(exercise) {
 }
 
 export function isStructuredExercise(exercise) {
-  return ['weighted_reps', 'reps', 'timed'].includes(exercise.type);
+  return ['weighted_reps', 'reps', 'timed', 'weighted_timed'].includes(exercise.type);
 }
 
 export function isCardExercise(exercise) {
-  return isStructuredExercise(exercise) || exercise.type === 'carry';
+  return isStructuredExercise(exercise) || ['carry', 'weighted_distance'].includes(exercise.type);
 }
 
 export function isChecklistExercise(exercise) {

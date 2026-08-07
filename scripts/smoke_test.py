@@ -16,7 +16,10 @@ REQUIRED_FILES = [
     'js/db.js',
     'js/utils/datetime.js',
     'js/seed/blueprint-v1.js',
+    'js/seed/exercise-library-v1.js',
     'js/services/campaign.js',
+    'js/services/campaignLibrary.js',
+    'js/services/campaignPrescription.js',
     'js/services/mission.js',
     'js/services/coach.js',
     'js/services/integrity.js',
@@ -32,6 +35,13 @@ REQUIRED_FILES = [
     'js/services/garminCoach.js',
     'js/services/campaignReview.js',
     'js/services/wakeLock.js',
+    'js/services/trackingTypes.js',
+    'js/services/equipment.js',
+    'js/services/exerciseLibrary.js',
+    'js/ui/exerciseLibrary.js',
+    'js/ui/campaignLibrary.js',
+    'js/ui/campaignBuilder.js',
+    'js/ui/exercisePicker.js',
     'js/services/garminChart.js',
     'js/services/progressionCoach.js',
     'js/services/backupSnapshot.js',
@@ -68,10 +78,11 @@ def test_service_worker_cache():
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
     assert 'workout%20complete/mission-accomplished.mp3' in text
-    assert 'athlete-os-v34' in text
-    assert 'overlay--day-summary' in (ROOT / 'css/app.css').read_text(encoding='utf-8')
-    assert 'renderDaySummaryOverlay' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
-    assert 'wakeLock.js' in text
+    assert 'athlete-os-v53' in text
+    assert 'campaignLibrary.js' in text
+    assert 'bindDaySummarySwipe' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
+    assert 'seedExerciseLibraryIfNeeded' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
+    assert 'initExerciseLibraryUI' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
     assert 'soundEnabled' in (ROOT / 'js/services/settings.js').read_text(encoding='utf-8')
     assert 'buildDaySummary' in (ROOT / 'js/services/campaignReview.js').read_text(encoding='utf-8')
     assert 'week-strip-day[data-date]' in (ROOT / 'js/app.js').read_text(encoding='utf-8')

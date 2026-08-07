@@ -1,5 +1,6 @@
 import { addDays } from '../utils/datetime.js';
 import { calculateRollingAverage, sortDailyHealth, formatSleepDuration } from './garminTrend.js';
+import { getChartColors } from '../utils/chartColors.js';
 
 export function getGarminChartDateRange(rangeKey, campaign, endDate) {
   switch (rangeKey) {
@@ -25,6 +26,7 @@ function rollingRhr(records, date) {
 }
 
 export function renderGarminChartSvg(records, options = {}) {
+  const colors = getChartColors();
   const {
     width = 320,
     height = 180,
@@ -48,7 +50,7 @@ export function renderGarminChartSvg(records, options = {}) {
     .filter(Boolean);
 
   if (!points.length) {
-    return `<svg class="weight-chart-svg garmin-chart-svg" viewBox="0 0 ${width} ${height}" aria-hidden="true"><text x="50%" y="50%" text-anchor="middle" fill="#8a9299" font-size="12">No ${metric === 'sleep' ? 'sleep' : 'RHR'} data for this range</text></svg>`;
+    return `<svg class="weight-chart-svg garmin-chart-svg" viewBox="0 0 ${width} ${height}" aria-hidden="true"><text x="50%" y="50%" text-anchor="middle" fill="${colors.muted}" font-size="12">No ${metric === 'sleep' ? 'sleep' : 'RHR'} data for this range</text></svg>`;
   }
 
   const padding = { top: 16, right: 12, bottom: 24, left: 36 };
@@ -81,14 +83,14 @@ export function renderGarminChartSvg(records, options = {}) {
   const yLabels = [minY, (minY + maxY) / 2, maxY]
     .map((v) => {
       const label = metric === 'sleep' ? `${v.toFixed(1)}h` : `${Math.round(v)}`;
-      return `<text x="${padding.left - 6}" y="${yPos(v).toFixed(1)}" text-anchor="end" fill="#8a9299" font-size="9">${label}</text>`;
+      return `<text x="${padding.left - 6}" y="${yPos(v).toFixed(1)}" text-anchor="end" fill="${colors.muted}" font-size="9">${label}</text>`;
     })
     .join('');
 
   let campaignMarker = '';
   if (campaignStartDate && campaignStartDate >= minDate && campaignStartDate <= maxDate) {
     const cx = xPos(campaignStartDate);
-    campaignMarker = `<line x1="${cx}" y1="${padding.top}" x2="${cx}" y2="${padding.top + plotH}" stroke="#6b8f4e" stroke-dasharray="4 3" stroke-width="1"/>`;
+    campaignMarker = `<line x1="${cx}" y1="${padding.top}" x2="${cx}" y2="${padding.top + plotH}" stroke="${colors.campaign}" stroke-dasharray="4 3" stroke-width="1"/>`;
   }
 
   const ariaLabel = metric === 'sleep' ? 'Sleep trend chart (7-day rolling average)' : 'Resting heart rate trend chart (7-day rolling average)';
@@ -97,7 +99,7 @@ export function renderGarminChartSvg(records, options = {}) {
     <svg class="weight-chart-svg garmin-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}">
       ${yLabels}
       ${campaignMarker}
-      <path d="${line}" fill="none" stroke="#3d8b8b" stroke-width="2.5"/>
+      <path d="${line}" fill="none" stroke="${colors.garmin}" stroke-width="2.5"/>
     </svg>
   `;
 }

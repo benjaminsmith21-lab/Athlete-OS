@@ -1,18 +1,19 @@
 import { get, put, getAll } from '../db.js';
-import { CAMPAIGN_ID } from '../seed/blueprint-v1.js';
+import { getActiveCampaignId } from './campaign.js';
 import { MISSION_RATINGS, MISSION_STATUS } from './mission.js';
 
-export async function getIntegrity() {
-  let record = await get('integrity', CAMPAIGN_ID);
+export async function getIntegrity(campaignId = null) {
+  const id = campaignId || (await getActiveCampaignId());
+  let record = await get('integrity', id);
   if (!record) {
-    record = { campaignId: CAMPAIGN_ID, fdsCount: 0, lastMissionDate: null, consecutiveMisses: 0 };
+    record = { campaignId: id, fdsCount: 0, lastMissionDate: null, consecutiveMisses: 0 };
     await put('integrity', record);
   }
   return record;
 }
 
 export async function updateIntegrityAfterMission(mission) {
-  const integrity = await getIntegrity();
+  const integrity = await getIntegrity(mission.campaignId);
   const today = mission.date;
   const yesterday = getYesterday(today);
 
@@ -48,7 +49,7 @@ export async function updateIntegrityAfterMission(mission) {
 }
 
 export async function adjustIntegrityAfterDelete(deletedMission) {
-  const integrity = await getIntegrity();
+  const integrity = await getIntegrity(deletedMission.campaignId);
 
   if (deletedMission.isFds || deletedMission.rating === MISSION_RATINGS.MINIMUM) {
     integrity.fdsCount = Math.max(0, (integrity.fdsCount || 0) - 1);

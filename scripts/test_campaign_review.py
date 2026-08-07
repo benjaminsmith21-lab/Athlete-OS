@@ -23,8 +23,9 @@ def test_progression_coach_exports():
     text = (ROOT / 'js/services/progressionCoach.js').read_text(encoding='utf-8')
     assert 'getProgressionHints' in text
     assert 'formatExerciseHistoryRows' in text
-    assert 'mon-hangs' in text
-    assert 'mon-z2' in text
+    assert 'getLibraryIdForLegacyInstance' in text
+    assert 'ring-hangs' in text
+    assert 'zone-2-run' in text
 
 
 def test_garmin_chart_exports():
@@ -42,6 +43,11 @@ def test_app_wires_review_screen():
     assert 'adj-run-duration' in text
     assert 'buildMissionBriefCardHtml' in text
     assert 'exercise-swipe-card' in text
+    assert 'bindDaySummarySwipe' in text
+    assert 'openExerciseLibrary' in text
+    assert 'openCampaignLibrary' in text
+    assert 'Exercise Library' in text
+    assert 'Campaign Library' in text
     assert 'Operation Forge' in (ROOT / 'js/seed/blueprint-v1.js').read_text(encoding='utf-8')
     assert 'OPERATION_META' in (ROOT / 'js/seed/blueprint-v1.js').read_text(encoding='utf-8')
 

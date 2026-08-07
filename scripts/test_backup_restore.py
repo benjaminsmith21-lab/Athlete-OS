@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-BACKUP_SCHEMA_VERSION = 3
+BACKUP_SCHEMA_VERSION = 5
 BACKUP_STORES = [
     'campaigns',
     'weeklyBlueprints',
@@ -16,6 +16,7 @@ BACKUP_STORES = [
     'dailyHealth',
     'garminActivities',
     'integrationSyncState',
+    'exerciseLibrary',
 ]
 
 STORE_KEY_PATHS = {
@@ -30,6 +31,7 @@ STORE_KEY_PATHS = {
     'garminActivities': 'sourceActivityId',
     'integrationSyncState': 'integration',
     'backupSnapshots': 'id',
+    'exerciseLibrary': 'id',
 }
 
 MAX_SNAPSHOTS = 3
@@ -137,7 +139,8 @@ def test_js_modules_exist():
     assert 'validateBackup' in backup_js
     assert 'bodyMeasurements' in backup_js
     assert 'backupSnapshots' in db_js
-    assert 'DB_VERSION = 5' in db_js
+    assert 'DB_VERSION = 7' in db_js
+    assert 'exerciseLibrary' in backup_js
     assert 'scheduleBackupSnapshot' in snapshot_js
     assert 'runAutoExportIfNeeded' in scheduler_js
 

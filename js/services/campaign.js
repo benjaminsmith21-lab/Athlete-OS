@@ -1,46 +1,27 @@
 import { BLUEPRINT, CAMPAIGN_ID } from '../seed/blueprint-v1.js';
 import { get, getAll, put } from '../db.js';
+import { getSettings } from './settings.js';
+import { migrateLegacyCampaignIfNeeded } from './campaignLibrary.js';
 
 export const DEFAULT_BODY_METRICS = BLUEPRINT.bodyMetrics;
 
 export async function seedIfNeeded() {
-  const existing = await get('campaigns', CAMPAIGN_ID);
-  if (existing) return mergeCampaignBodyMetrics(existing);
+  await migrateLegacyCampaignIfNeeded();
+}
 
-  const campaign = {
-    id: CAMPAIGN_ID,
-    name: BLUEPRINT.name,
-    season: BLUEPRINT.season,
-    missionStatement: BLUEPRINT.missionStatement,
-    startDate: BLUEPRINT.startDate,
-    durationWeeks: BLUEPRINT.durationWeeks,
-    identity: BLUEPRINT.identity,
-    progressionRules: BLUEPRINT.progressionRules,
-    nutrition: BLUEPRINT.nutrition,
-    finalReminder: BLUEPRINT.finalReminder,
-    bodyMetrics: structuredClone(BLUEPRINT.bodyMetrics)
-  };
-  await put('campaigns', campaign);
+export async function getActiveCampaignId() {
+  const settings = await getSettings();
+  return settings.activeCampaignId || CAMPAIGN_ID;
+}
 
-  for (const bp of BLUEPRINT.weeklyBlueprints) {
-    await put('weeklyBlueprints', {
-      id: `${CAMPAIGN_ID}-day-${bp.dayOfWeek}`,
-      campaignId: CAMPAIGN_ID,
-      dayOfWeek: bp.dayOfWeek,
-      dayName: bp.dayName,
-      operation: bp.operation,
-      exercises: bp.exercises
-    });
+export async function getActiveCampaign() {
+  await seedIfNeeded();
+  const campaignId = await getActiveCampaignId();
+  const campaign = await get('campaigns', campaignId);
+  if (!campaign) {
+    return mergeCampaignBodyMetrics(await migrateLegacyCampaignIfNeeded());
   }
-
-  await put('integrity', {
-    campaignId: CAMPAIGN_ID,
-    fdsCount: 0,
-    lastMissionDate: null,
-    consecutiveMisses: 0
-  });
-
-  return campaign;
+  return mergeCampaignBodyMetrics(campaign);
 }
 
 function mergeCampaignBodyMetrics(campaign) {
@@ -51,17 +32,6 @@ function mergeCampaignBodyMetrics(campaign) {
   return campaign;
 }
 
-export async function getActiveCampaign() {
-  await seedIfNeeded();
-  const campaign = await get('campaigns', CAMPAIGN_ID);
-  const merged = mergeCampaignBodyMetrics(campaign);
-  if (merged.name !== BLUEPRINT.name) {
-    merged.name = BLUEPRINT.name;
-    await put('campaigns', merged);
-  }
-  return merged;
-}
-
 export async function updateCampaignBodyMetrics(partial) {
   const campaign = await getActiveCampaign();
   campaign.bodyMetrics = { ...campaign.bodyMetrics, ...partial };
@@ -69,20 +39,21 @@ export async function updateCampaignBodyMetrics(partial) {
   return campaign;
 }
 
-export async function getBlueprintForDay(dayOfWeek) {
+export async function getBlueprintForDay(dayOfWeek, campaignId = null) {
   await seedIfNeeded();
+  const activeId = campaignId || (await getActiveCampaignId());
   const all = await getAll('weeklyBlueprints');
-  return all.find((b) => b.dayOfWeek === dayOfWeek && b.campaignId === CAMPAIGN_ID);
+  return all.find((b) => b.dayOfWeek === dayOfWeek && b.campaignId === activeId);
 }
 
 export async function getTodayBlueprint() {
   return getBlueprintForDay(new Date().getDay());
 }
 
-export function getCampaignWeek(startDate, currentDate = new Date()) {
+export function getCampaignWeek(startDate, currentDate = new Date(), durationWeeks = 12) {
   const start = new Date(startDate + 'T12:00:00');
   const now = new Date(currentDate);
   const diffMs = now - start;
   const week = Math.max(1, Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1);
-  return Math.min(week, 12);
+  return Math.min(week, durationWeeks || 12);
 }

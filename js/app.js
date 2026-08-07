@@ -126,6 +126,22 @@ import {
   isReviewWeek
 } from './services/campaignReview.js';
 import { syncWakeLockForScreen } from './services/wakeLock.js';
+import { seedExerciseLibraryIfNeeded, getExercise, getLibraryIdForLegacyInstance } from './services/exerciseLibrary.js';
+import { buildTechnique } from './services/exerciseSchema.js';
+import { recordRecentExercise } from './services/exercisePreferences.js';
+import {
+  initExerciseLibraryUI,
+  renderExerciseLibraryList
+} from './ui/exerciseLibrary.js';
+import { migrateLegacyCampaignIfNeeded, endCampaign, getCampaign } from './services/campaignLibrary.js';
+import {
+  initCampaignLibraryUI,
+  renderCampaignLibraryList,
+  renderCampaignLibraryView,
+  confirmActivateCampaign
+} from './ui/campaignLibrary.js';
+import { initCampaignBuilderUI, renderCampaignBuilder } from './ui/campaignBuilder.js';
+import { initExercisePicker } from './ui/exercisePicker.js';
 import { renderGarminChartSvg, getGarminChartDateRange } from './services/garminChart.js';
 import { getProgressionHints, formatExerciseHistoryRows } from './services/progressionCoach.js';
 import { getAll } from './db.js';
@@ -169,7 +185,15 @@ const state = {
   warmupRemaining: WARMUP_DURATION_SECONDS,
   warmupSoundPlayed: false,
   warmupEncouragementWord: null,
-  weekStripDays: []
+  weekStripDays: [],
+  exerciseLibrarySearch: '',
+  exerciseLibraryFilter: 'all',
+  exerciseLibraryFlash: null,
+  campaignLibraryFlash: null,
+  builderCampaignId: null,
+  builderCampaign: null,
+  builderDayOfWeek: 1,
+  builderStage: 'details'
 };
 
 let restTimerInterval = null;
@@ -178,6 +202,7 @@ let durationTimerInterval = null;
 let warmupTimerInterval = null;
 let warmupCelebrateTimeout = null;
 let restCompleteAudio = null;
+const libraryExerciseCache = {};
 
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
 const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
@@ -394,6 +419,24 @@ function renderWarmupFlowLines(unit) {
   ];
 }
 
+function getWarmupSteps() {
+  if (state.blueprint?.warmupSteps?.length) {
+    return state.blueprint.warmupSteps.map((step, index) => ({
+      minute: index + 1,
+      title: step.title,
+      rx: step.rx || '',
+      purpose: step.purpose || '',
+      isFlow: step.isFlow === true,
+      durationSeconds: step.durationSeconds || WARMUP_DURATION_SECONDS
+    }));
+  }
+  return WARMUP_STEPS;
+}
+
+function getWarmupStepDuration(step) {
+  return step?.durationSeconds || WARMUP_DURATION_SECONDS;
+}
+
 function formatWarmupStepRx(step, unit) {
   const weights = getWarmupWeights();
   if (step.isFlow) {
@@ -455,9 +498,10 @@ function bindWarmupDials(container) {
 }
 
 function renderWarmupDots(activeIndex) {
+  const steps = getWarmupSteps();
   return `
     <div class="exercise-dots" aria-hidden="true">
-      ${WARMUP_STEPS.map((_, i) => {
+      ${steps.map((_, i) => {
         const classes = ['exercise-dot'];
         if (i < activeIndex) classes.push('exercise-dot--done');
         if (i === activeIndex) classes.push('exercise-dot--active');
@@ -478,9 +522,10 @@ function renderTimerRingCenter({ phase, displayTime = null, encouragementWord = 
 }
 
 function renderWarmupScreen() {
-  const step = WARMUP_STEPS[state.warmupStepIndex];
+  const steps = getWarmupSteps();
+  const step = steps[state.warmupStepIndex];
   const unit = state.settings?.weightUnit || 'kg';
-  const total = WARMUP_DURATION_SECONDS;
+  const total = getWarmupStepDuration(step);
   const remaining = state.warmupRemaining;
   const phase = state.warmupPhase;
   const progress =
@@ -509,7 +554,7 @@ function renderWarmupScreen() {
 
   return `
     <div class="warmup-layout">
-      <p class="section-label">Warm-up · Minute ${step.minute} of ${WARMUP_STEPS.length}</p>
+      <p class="section-label">Warm-up · Minute ${step.minute} of ${steps.length}</p>
       <div class="warmup-panel">
         <div class="warmup-ring-wrap">
           <button type="button" class="timed-countdown-ring warmup-ring${activeClass}" id="btn-warmup-ring"
@@ -578,10 +623,13 @@ function startWarmupCelebration() {
 
 function startWarmupInterval() {
   clearWarmupTimer();
+  const steps = getWarmupSteps();
+  const step = steps[state.warmupStepIndex];
+  const stepDuration = getWarmupStepDuration(step);
   const soundPlayed = { value: state.warmupSoundPlayed };
   if (isRestSoundEnabled()) {
     preloadRestCompleteSound();
-    maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, soundPlayed);
+    maybePlayRestCompleteSound(state.warmupRemaining, stepDuration, soundPlayed);
     state.warmupSoundPlayed = soundPlayed.value;
   }
 
@@ -589,13 +637,13 @@ function startWarmupInterval() {
     state.warmupRemaining -= 1;
     const tickSound = { value: state.warmupSoundPlayed };
     if (isRestSoundEnabled()) {
-      maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, tickSound);
+      maybePlayRestCompleteSound(state.warmupRemaining, stepDuration, tickSound);
     }
     state.warmupSoundPlayed = tickSound.value;
 
     if (state.warmupRemaining <= 0) {
       clearWarmupTimer();
-      if (state.warmupStepIndex >= WARMUP_STEPS.length - 1) {
+      if (state.warmupStepIndex >= steps.length - 1) {
         startWarmupCelebration();
         return;
       }
@@ -696,7 +744,77 @@ function toggleSettings() {
     renderCentre();
     return;
   }
+  if (state.screen === 'exercise-library' || state.screen === 'campaign-library' || state.screen === 'campaign-view' || state.screen === 'campaign-builder') {
+    renderSettings();
+    return;
+  }
   renderSettings();
+}
+
+async function openExerciseLibrary() {
+  state.screen = 'exercise-library';
+  syncWakeLockForScreen('settings');
+  await renderExerciseLibraryList();
+}
+
+async function openCampaignLibrary() {
+  state.screen = 'campaign-library';
+  syncWakeLockForScreen('settings');
+  await renderCampaignLibraryList();
+}
+
+function openCampaignBuilder(campaignId) {
+  state.builderStage = 'details';
+  state.builderDayOfWeek = 1;
+  renderCampaignBuilder(campaignId);
+}
+
+function openCampaignView(campaignId) {
+  renderCampaignLibraryView(campaignId);
+}
+
+async function openActivateConfirm(campaignId) {
+  await confirmActivateCampaign(campaignId);
+  await reloadAppStateAfterRestore();
+  if (state.screen === 'centre' || state.mission) {
+    renderCentre();
+  }
+}
+
+async function openEndCampaignConfirm(campaignId) {
+  const campaign = await getCampaign(campaignId);
+  if (!campaign) return;
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">End Campaign?</p>
+    <p class="overlay-sub">You're ending <strong>${escapeHtml(campaign.name)}</strong> as your active campaign.</p>
+    <p class="overlay-sub"><strong>Kept:</strong> all completed workouts, set logs, body data, and campaign design (moves to Archive as Completed).</p>
+    <p class="overlay-sub"><strong>Stops:</strong> today's active training plan until you activate another campaign (or duplicate/reactivate this one).</p>
+    <p class="overlay-sub"><strong>Reload:</strong> duplicate the campaign from Archive to edit and activate again; historical logs stay tied to the original.</p>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-end-campaign">End Campaign</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-end-campaign">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-confirm-end-campaign').addEventListener('click', () => confirmEndCampaign(campaignId));
+  $('#btn-cancel-end-campaign').addEventListener('click', closeOverlay);
+}
+
+async function confirmEndCampaign(campaignId) {
+  closeOverlay();
+  const wasActive = state.settings?.activeCampaignId === campaignId;
+  await endCampaign(campaignId);
+  if (wasActive) {
+    await reloadAppStateAfterRestore();
+    state.campaignLibraryFlash = 'Campaign ended.';
+    if (state.screen === 'centre' || state.screen === 'campaign-library' || state.screen === 'campaign-view') {
+      if (state.screen === 'centre') renderCentre();
+      else await renderCampaignLibraryList();
+    }
+  } else {
+    state.campaignLibraryFlash = 'Campaign ended.';
+    await renderCampaignLibraryList();
+  }
 }
 
 function formatPrescriptionForDisplay(exercise, weightUnit) {
@@ -865,6 +983,84 @@ async function renderDaySummaryOverlay(dateStr) {
     if (!hasNext) return;
     renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, 1));
   });
+  bindDaySummarySwipe(dateStr, hasPrev, hasNext);
+}
+
+function bindDaySummarySwipe(dateStr, hasPrev, hasNext) {
+  const shell = $('.day-summary-shell');
+  if (!shell) return;
+
+  let startX = 0;
+  let startY = 0;
+  let currentX = 0;
+  let dragging = false;
+  let horizontal = false;
+  const threshold = 72;
+
+  function resetShell() {
+    shell.classList.add('day-summary-shell--snap');
+    shell.style.transform = '';
+  }
+
+  function finishSwipe() {
+    if (!dragging) return;
+    dragging = false;
+    horizontal = false;
+    shell.classList.remove('is-dragging');
+
+    if (horizontal && currentX <= -threshold && hasNext) {
+      renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, 1));
+      return;
+    }
+    if (horizontal && currentX >= threshold && hasPrev) {
+      renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, -1));
+      return;
+    }
+    resetShell();
+    currentX = 0;
+  }
+
+  function onStart(clientX, clientY) {
+    startX = clientX;
+    startY = clientY;
+    currentX = 0;
+    dragging = true;
+    horizontal = false;
+    shell.classList.add('is-dragging');
+    shell.classList.remove('day-summary-shell--snap');
+  }
+
+  function onMove(clientX, clientY) {
+    if (!dragging) return;
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      horizontal = true;
+    }
+    if (!horizontal) return;
+    currentX = dx;
+    shell.style.transform = `translateX(${currentX}px)`;
+  }
+
+  shell.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.target.closest('.day-summary-nav, button, a')) return;
+      onStart(e.touches[0].clientX, e.touches[0].clientY);
+    },
+    { passive: true }
+  );
+  shell.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!dragging) return;
+      onMove(e.touches[0].clientX, e.touches[0].clientY);
+      if (horizontal) e.preventDefault();
+    },
+    { passive: false }
+  );
+  shell.addEventListener('touchend', finishSwipe);
+  shell.addEventListener('touchcancel', finishSwipe);
 }
 
 function isBodyweightDialValue(text) {
@@ -1487,6 +1683,89 @@ function renderFlowCompleteScreen() {
   $('#btn-finish-flow-mission').addEventListener('click', () => afterExerciseComplete(true));
 }
 
+async function getLibraryExerciseForMission(exercise) {
+  const libraryId = exercise.libraryExerciseId || getLibraryIdForLegacyInstance(exercise.id);
+  if (!libraryId) return null;
+  if (libraryExerciseCache[libraryId]) return libraryExerciseCache[libraryId];
+  const record = await getExercise(libraryId);
+  if (record) libraryExerciseCache[libraryId] = record;
+  return record;
+}
+
+const SETUP_PREVIEW_MAX = 120;
+
+function truncateSetup(text, max = SETUP_PREVIEW_MAX) {
+  if (!text || text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
+function renderExerciseFormCues(libraryExercise) {
+  const technique = buildTechnique(libraryExercise?.technique || {});
+  if (!technique) return '';
+
+  const { setup, cues, commonMistakes } = technique;
+  const previewCues = cues.slice(0, 2);
+  const hasExtraCues = cues.length > 2;
+  const setupNeedsExpand = setup.length > SETUP_PREVIEW_MAX;
+
+  let previewHtml = '';
+  if (cues.length) {
+    previewHtml = `<ul class="exercise-form-list exercise-form-list--preview">${previewCues.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+  } else if (setup) {
+    previewHtml = `<p class="exercise-form-setup exercise-form-setup--preview">${escapeHtml(truncateSetup(setup))}</p>`;
+  }
+
+  const hasMore = Boolean(
+    (setup && cues.length > 0) ||
+    setupNeedsExpand ||
+    hasExtraCues ||
+    commonMistakes.length
+  );
+
+  let expandedHtml = '';
+  if (hasMore) {
+    const parts = [];
+    if (setup && (cues.length > 0 || setupNeedsExpand)) {
+      parts.push(`<p class="exercise-form-setup">${escapeHtml(setup)}</p>`);
+    }
+    if (hasExtraCues) {
+      parts.push(
+        `<ul class="exercise-form-list">${cues.slice(2).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+      );
+    }
+    if (commonMistakes.length) {
+      parts.push(
+        `<p class="exercise-form-sub-label">Common mistakes</p><ul class="exercise-form-list">${commonMistakes.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+      );
+    }
+    expandedHtml = parts.join('');
+  }
+
+  return `
+    <div class="exercise-form-cues" id="exercise-form-cues">
+      <p class="exercise-form-label">Form</p>
+      ${previewHtml}
+      ${hasMore ? '<button type="button" class="btn-text exercise-form-more-btn" id="btn-form-more">More</button>' : ''}
+      <div class="exercise-form-expanded hidden" id="exercise-form-expanded">
+        ${expandedHtml}
+      </div>
+    </div>
+  `;
+}
+
+function bindExerciseFormMoreToggle() {
+  const btn = document.getElementById('btn-form-more');
+  const expanded = document.getElementById('exercise-form-expanded');
+  const container = document.getElementById('exercise-form-cues');
+  if (!btn || !expanded) return;
+  btn.addEventListener('click', () => {
+    const isHidden = expanded.classList.contains('hidden');
+    expanded.classList.toggle('hidden', !isHidden);
+    btn.textContent = isHidden ? 'Less' : 'More';
+    if (container) container.classList.toggle('exercise-form-cues--expanded', isHidden);
+  });
+}
+
 function renderActiveExerciseBody(
   exercise,
   prev,
@@ -1499,7 +1778,8 @@ function renderActiveExerciseBody(
   completedCount = 0,
   exercises = [],
   setLogs = [],
-  mission = null
+  mission = null,
+  libraryExercise = null
 ) {
   const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
@@ -1507,17 +1787,20 @@ function renderActiveExerciseBody(
   const exerciseName = escapeHtml(formatExerciseName(exercise.name));
   const isTimed = exercise.type === 'timed';
   const cardClass = isTimed ? 'exercise-card exercise-card--timed' : 'exercise-card exercise-card--name-center';
+  const formCuesHtml = renderExerciseFormCues(libraryExercise);
   const cardBody = isTimed
     ? `
             <h2 class="exercise-name exercise-name--header">${exerciseName}</h2>
             <div class="exercise-focus">
               ${renderTimedCountdownBlock(exercise, fields)}
             </div>
+            ${formCuesHtml}
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
           `
     : `
             <div class="exercise-focus">
               <h2 class="exercise-name">${exerciseName}</h2>
+              ${formCuesHtml}
             </div>
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
           `;
@@ -1742,6 +2025,37 @@ async function init() {
     }
 
     state.settings = await getSettings();
+    initExerciseLibraryUI({
+      screenRoot,
+      uiState: state,
+      escapeHtml,
+      setHeader,
+      renderSettings
+    });
+    initExercisePicker({ overlayRoot: overlayContent, escapeHtml, overlayBackdrop: overlay });
+    initCampaignLibraryUI({
+      screenRoot,
+      uiState: state,
+      escapeHtml,
+      setHeader,
+      renderSettings,
+      openCampaignBuilder,
+      openCampaignView,
+      openActivateConfirm,
+      openEndCampaignConfirm
+    });
+    initCampaignBuilderUI({
+      screenRoot,
+      overlayRoot: overlayContent,
+      overlayBackdrop: overlay,
+      uiState: state,
+      escapeHtml,
+      setHeader,
+      renderCampaignLibraryList,
+      openActivateConfirm
+    });
+    await seedExerciseLibraryIfNeeded();
+    await migrateLegacyCampaignIfNeeded();
     await requestPersistentStorage();
     state.campaign = await getActiveCampaign();
     state.blueprint = await getTodayBlueprint();
@@ -2553,7 +2867,7 @@ function renderCentre() {
   const active = state.mission.status === MISSION_STATUS.ACTIVE;
   setHeader('Command Centre');
 
-  const week = getCampaignWeek(state.campaign.startDate);
+  const week = getCampaignWeek(state.campaign.startDate, new Date(), state.campaign.durationWeeks);
   const exerciseCount = state.blueprint.exercises.length;
 
   const today = getLocalDateString();
@@ -2730,6 +3044,13 @@ async function renderSettings() {
               <span class="toggle-knob"></span>
             </button>
           </div>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Training</p>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-campaign-library">Campaign Library</button>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-exercise-library">Exercise Library</button>
+          <p class="settings-hint">Create campaigns, browse exercises, and plan your training season.</p>
         </div>
 
         <div class="settings-group">
@@ -2922,6 +3243,8 @@ async function renderSettings() {
   });
 
   $('#btn-settings-back').addEventListener('click', () => renderCentre());
+  $('#btn-open-exercise-library')?.addEventListener('click', () => openExerciseLibrary());
+  $('#btn-open-campaign-library')?.addEventListener('click', () => openCampaignLibrary());
 }
 
 function openBackupImportOverlay() {
@@ -3181,6 +3504,11 @@ async function renderActiveAtIndex(index) {
 
   beginExerciseTimer();
 
+  const libraryExercise = await getLibraryExerciseForMission(exercise);
+  if (libraryExercise?.id) {
+    await recordRecentExercise(libraryExercise.id);
+  }
+
   const bodyHtml = renderActiveExerciseBody(
     exercise,
     prev,
@@ -3193,7 +3521,8 @@ async function renderActiveAtIndex(index) {
     completedCount,
     flowExercises,
     state.setLogs,
-    state.mission
+    state.mission,
+    libraryExercise
   );
 
   const screenBody = $('.screen-body');
@@ -3203,6 +3532,7 @@ async function renderActiveAtIndex(index) {
     screenBody.innerHTML = bodyHtml;
     screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
     bindExerciseActions(exercise, flowExercises, flowIndex, fields);
+    bindExerciseFormMoreToggle();
     return;
   }
 
@@ -3218,6 +3548,7 @@ async function renderActiveAtIndex(index) {
   `;
 
   bindExerciseActions(exercise, flowExercises, flowIndex, fields);
+  bindExerciseFormMoreToggle();
 }
 
 async function renderActive() {
@@ -3528,7 +3859,7 @@ function openFdsOverlay() {
 
 function closeOverlay() {
   overlay.classList.add('hidden');
-  overlay.classList.remove('overlay--weigh-in', 'overlay--day-summary');
+  overlay.classList.remove('overlay--weigh-in', 'overlay--day-summary', 'overlay--picker');
   overlayContent.innerHTML = '';
 }
 

@@ -169,7 +169,7 @@ def test_backup_includes_garmin_stores():
     assert 'dailyHealth' in backup_js
     assert 'garminActivities' in backup_js
     assert 'integrationSyncState' in backup_js
-    assert 'BACKUP_SCHEMA_VERSION = 3' in backup_js
+    assert 'BACKUP_SCHEMA_VERSION = 5' in backup_js
 
 
 def test_db_v4_stores():

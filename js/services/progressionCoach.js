@@ -1,15 +1,21 @@
 import { formatExerciseName } from './mission.js';
+import { getLibraryIdForLegacyInstance } from '../seed/exercise-library-v1.js';
 
-const TIMED_EXERCISE_IDS = ['mon-hangs', 'thu-hangs', 'fri-hangs', 'fds-hangs'];
-const WEIGHTED_PROGRESSION_IDS = ['tue-goblet', 'tue-row', 'mon-halos'];
+const TIMED_LIBRARY_IDS = new Set(['ring-hangs']);
+const WEIGHTED_LIBRARY_IDS = new Set(['goblet-squat', 'row', 'halos']);
+
+function libraryIdForExercise(exercise) {
+  return getLibraryIdForLegacyInstance(exercise.id);
+}
 
 export function getProgressionHints(exercise, recentLogs = []) {
   if (!exercise || !recentLogs.length) return [];
 
   const hints = [];
   const name = formatExerciseName(exercise.name);
+  const libraryId = libraryIdForExercise(exercise);
 
-  if (exercise.type === 'timed' || TIMED_EXERCISE_IDS.includes(exercise.id)) {
+  if (exercise.type === 'timed' || TIMED_LIBRARY_IDS.has(libraryId)) {
     const prescribed = exercise.duration;
     const matching = recentLogs.filter((l) => l.actual?.duration === prescribed);
     if (matching.length >= 2 && prescribed != null) {
@@ -22,7 +28,7 @@ export function getProgressionHints(exercise, recentLogs = []) {
     }
   }
 
-  if (exercise.type === 'weighted_reps' || WEIGHTED_PROGRESSION_IDS.includes(exercise.id)) {
+  if (exercise.type === 'weighted_reps' || WEIGHTED_LIBRARY_IDS.has(libraryId)) {
     const prescribedWeight = exercise.weight;
     const prescribedReps = exercise.reps;
     const matching = recentLogs.filter(
@@ -41,7 +47,7 @@ export function getProgressionHints(exercise, recentLogs = []) {
     }
   }
 
-  if (exercise.id === 'mon-z2' && recentLogs.length >= 2) {
+  if (libraryId === 'zone-2-run' && recentLogs.length >= 2) {
     const withPace = recentLogs.filter((l) => l.actual?.distance && l.actual?.elapsedSeconds);
     if (withPace.length >= 2) {
       hints.push({

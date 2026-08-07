@@ -1,8 +1,9 @@
 import { getAll, clearStore, clearAllStores, put } from '../db.js';
 import { getLocalISOString } from '../utils/datetime.js';
 import { getAllMeasurements, saveDailyMeasurement } from './bodyMeasurement.js';
+import { mergeExerciseLibraryOnRestore } from './exerciseLibrary.js';
 
-export const BACKUP_SCHEMA_VERSION = 3;
+export const BACKUP_SCHEMA_VERSION = 5;
 
 export const BACKUP_STORES = [
   'campaigns',
@@ -13,7 +14,8 @@ export const BACKUP_STORES = [
   'settings',
   'dailyHealth',
   'garminActivities',
-  'integrationSyncState'
+  'integrationSyncState',
+  'exerciseLibrary'
 ];
 
 export async function exportFullBackup() {
@@ -27,7 +29,8 @@ export async function exportFullBackup() {
     bodyMeasurements,
     dailyHealth,
     garminActivities,
-    integrationSyncState
+    integrationSyncState,
+    exerciseLibrary
   ] = await Promise.all([
     getAll('campaigns'),
     getAll('weeklyBlueprints'),
@@ -38,7 +41,8 @@ export async function exportFullBackup() {
     getAllMeasurements(),
     getAll('dailyHealth'),
     getAll('garminActivities'),
-    getAll('integrationSyncState')
+    getAll('integrationSyncState'),
+    getAll('exerciseLibrary')
   ]);
 
   return {
@@ -53,7 +57,8 @@ export async function exportFullBackup() {
     bodyMeasurements,
     dailyHealth,
     garminActivities,
-    integrationSyncState
+    integrationSyncState,
+    exerciseLibrary: exerciseLibrary.filter((item) => item.id !== 'exercise-library-seed-v1')
   };
 }
 
@@ -82,6 +87,10 @@ export function validateBackup(data) {
     if (!Array.isArray(data[key])) {
       return { valid: false, error: `Backup is missing a valid ${key} list.` };
     }
+  }
+
+  if (data.exerciseLibrary != null && !Array.isArray(data.exerciseLibrary)) {
+    return { valid: false, error: 'Backup is missing a valid exerciseLibrary list.' };
   }
 
   return { valid: true };
@@ -223,16 +232,20 @@ function parseEufyRow(cols, header) {
 }
 
 export async function applyBackup(data, options = {}) {
-  const stores = BACKUP_STORES;
+  const stores = BACKUP_STORES.filter((store) => store !== 'exerciseLibrary');
 
   if (options.replaceAll) {
-    await clearAllStores([...stores, 'bodyMeasurements']);
+    await clearAllStores([...stores, 'bodyMeasurements', 'exerciseLibrary']);
   }
 
   for (const store of stores) {
     for (const item of data[store] || []) {
       await put(store, item);
     }
+  }
+
+  if (Array.isArray(data.exerciseLibrary)) {
+    await mergeExerciseLibraryOnRestore(data.exerciseLibrary);
   }
 
   return data.bodyMeasurements || [];

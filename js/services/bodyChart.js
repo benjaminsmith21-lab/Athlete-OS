@@ -1,7 +1,9 @@
 import { addDays } from '../utils/datetime.js';
 import { calculateRollingAverage, isTrendEligible } from './bodyTrend.js';
+import { getChartColors } from '../utils/chartColors.js';
 
 export function renderWeightChartSvg(measurements, options = {}) {
+  const colors = getChartColors();
   const {
     width = 320,
     height = 180,
@@ -18,7 +20,7 @@ export function renderWeightChartSvg(measurements, options = {}) {
   });
 
   if (!eligible.length) {
-    return `<svg class="weight-chart-svg" viewBox="0 0 ${width} ${height}" aria-hidden="true"><text x="50%" y="50%" text-anchor="middle" fill="#8a9299" font-size="12">No data for this range</text></svg>`;
+    return `<svg class="weight-chart-svg" viewBox="0 0 ${width} ${height}" aria-hidden="true"><text x="50%" y="50%" text-anchor="middle" fill="${colors.muted}" font-size="12">No data for this range</text></svg>`;
   }
 
   const padding = { top: 16, right: 12, bottom: 24, left: 36 };
@@ -51,7 +53,7 @@ export function renderWeightChartSvg(measurements, options = {}) {
   const dailyDots = eligible
     .map(
       (m) =>
-        `<circle cx="${xPos(m.date).toFixed(1)}" cy="${yPos(m.weightKg).toFixed(1)}" r="3" fill="rgba(196,146,58,0.35)" data-date="${m.date}" data-weight="${m.weightKg}" class="chart-point"/>`
+        `<circle cx="${xPos(m.date).toFixed(1)}" cy="${yPos(m.weightKg).toFixed(1)}" r="3" fill="${colors.weightSoft}" data-date="${m.date}" data-weight="${m.weightKg}" class="chart-point"/>`
     )
     .join('');
 
@@ -62,19 +64,19 @@ export function renderWeightChartSvg(measurements, options = {}) {
   let campaignMarker = '';
   if (campaignStartDate && campaignStartDate >= minDate && campaignStartDate <= maxDate) {
     const cx = xPos(campaignStartDate);
-    campaignMarker = `<line x1="${cx}" y1="${padding.top}" x2="${cx}" y2="${padding.top + plotH}" stroke="#6b8f4e" stroke-dasharray="4 3" stroke-width="1"/>`;
+    campaignMarker = `<line x1="${cx}" y1="${padding.top}" x2="${cx}" y2="${padding.top + plotH}" stroke="${colors.campaign}" stroke-dasharray="4 3" stroke-width="1"/>`;
   }
 
   let targetLine = '';
   if (targetWeightKg) {
     const ty = yPos(targetWeightKg);
-    targetLine = `<line x1="${padding.left}" y1="${ty}" x2="${padding.left + plotW}" y2="${ty}" stroke="rgba(196,146,58,0.4)" stroke-width="1"/>`;
+    targetLine = `<line x1="${padding.left}" y1="${ty}" x2="${padding.left + plotW}" y2="${ty}" stroke="${colors.weightFaint}" stroke-width="1"/>`;
   }
 
   const yLabels = [minY, (minY + maxY) / 2, maxY]
     .map(
       (v) =>
-        `<text x="${padding.left - 6}" y="${yPos(v).toFixed(1)}" text-anchor="end" fill="#8a9299" font-size="9">${v.toFixed(1)}</text>`
+        `<text x="${padding.left - 6}" y="${yPos(v).toFixed(1)}" text-anchor="end" fill="${colors.muted}" font-size="9">${v.toFixed(1)}</text>`
     )
     .join('');
 
@@ -84,7 +86,7 @@ export function renderWeightChartSvg(measurements, options = {}) {
       ${targetLine}
       ${campaignMarker}
       ${dailyDots}
-      <path d="${rollingLine}" fill="none" stroke="#c4923a" stroke-width="2.5"/>
+      <path d="${rollingLine}" fill="none" stroke="${colors.weight}" stroke-width="2.5"/>
     </svg>
   `;
 }
