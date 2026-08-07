@@ -1,6 +1,12 @@
 import { addDays, getLocalDateString } from '../utils/datetime.js';
 import { getAll } from '../db.js';
-import { MISSION_STATUS, MISSION_RATINGS } from './mission.js';
+import {
+  getSetLogsForMission,
+  formatPerformanceSummary,
+  formatExerciseName,
+  MISSION_STATUS,
+  MISSION_RATINGS
+} from './mission.js';
 import {
   calculateRollingAverage,
   formatWeightChange,
@@ -16,13 +22,6 @@ import {
   getSleepSevenDayAverage
 } from './garminTrend.js';
 import { getBlueprintForDay, getCampaignWeek } from './campaign.js';
-import {
-  getSetLogsForMission,
-  formatPerformanceSummary,
-  formatExerciseName,
-  MISSION_STATUS,
-  MISSION_RATINGS
-} from './mission.js';
 
 export const REVIEW_WEEKS = [4, 8, 12];
 
