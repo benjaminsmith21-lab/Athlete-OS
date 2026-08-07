@@ -68,7 +68,9 @@ def test_service_worker_cache():
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
     assert 'workout%20complete/mission-accomplished.mp3' in text
-    assert 'athlete-os-v33' in text
+    assert 'athlete-os-v34' in text
+    assert 'overlay--day-summary' in (ROOT / 'css/app.css').read_text(encoding='utf-8')
+    assert 'renderDaySummaryOverlay' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
     assert 'wakeLock.js' in text
     assert 'soundEnabled' in (ROOT / 'js/services/settings.js').read_text(encoding='utf-8')
     assert 'buildDaySummary' in (ROOT / 'js/services/campaignReview.js').read_text(encoding='utf-8')

@@ -168,7 +168,8 @@ const state = {
   warmupStepIndex: 0,
   warmupRemaining: WARMUP_DURATION_SECONDS,
   warmupSoundPlayed: false,
-  warmupEncouragementWord: null
+  warmupEncouragementWord: null,
+  weekStripDays: []
 };
 
 let restTimerInterval = null;
@@ -466,12 +467,12 @@ function renderWarmupDots(activeIndex) {
   `;
 }
 
-function renderTimerRingCenter({ phase, encouragementWord = null }) {
+function renderTimerRingCenter({ phase, displayTime = null, encouragementWord = null }) {
   if (encouragementWord) {
     return `<span class="timed-countdown-word">${escapeHtml(encouragementWord)}</span>`;
   }
-  if (phase === 'running' || phase === 'prep') {
-    return '';
+  if ((phase === 'running' || phase === 'prep') && displayTime != null && displayTime !== '') {
+    return `<span class="timed-countdown-time">${escapeHtml(displayTime)}</span>`;
   }
   return TIMER_PLAY_ICON;
 }
@@ -491,8 +492,11 @@ function renderWarmupScreen() {
   if (phase === 'running') ariaLabel = 'Warm-up in progress';
   else if (phase === 'between') ariaLabel = 'Start next warm-up minute';
   else if (phase === 'celebrate') ariaLabel = 'Warm-up complete';
+  let warmupDisplayTime = null;
+  if (phase === 'running') warmupDisplayTime = formatDurationClock(remaining);
   const ringCenter = renderTimerRingCenter({
     phase,
+    displayTime: warmupDisplayTime,
     encouragementWord: phase === 'celebrate' ? state.warmupEncouragementWord : null
   });
   const rx = formatWarmupStepRx(step, unit);
@@ -789,13 +793,27 @@ function renderWeekStripHtml(days) {
 
 function bindWeekStripDays() {
   document.querySelectorAll('.week-strip-day[data-date]').forEach((btn) => {
-    btn.addEventListener('click', () => openDaySummaryOverlay(btn.dataset.date));
+    btn.addEventListener('click', () => renderDaySummaryOverlay(btn.dataset.date));
   });
 }
 
-async function openDaySummaryOverlay(dateStr) {
+function adjacentWeekStripDate(dateStr, delta) {
+  const dates = state.weekStripDays?.map((d) => d.date) || [];
+  const index = dates.indexOf(dateStr);
+  if (index < 0) return dateStr;
+  return dates[index + delta] ?? dateStr;
+}
+
+const DAY_SUMMARY_NAV_PREV = `<svg class="day-summary-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>`;
+const DAY_SUMMARY_NAV_NEXT = `<svg class="day-summary-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
+
+async function renderDaySummaryOverlay(dateStr) {
   const unit = state.settings?.weightUnit || 'kg';
   const summary = await buildDaySummary(dateStr);
+  const dates = state.weekStripDays?.map((d) => d.date) || [];
+  const dayIndex = dates.indexOf(dateStr);
+  const hasPrev = dayIndex > 0;
+  const hasNext = dayIndex >= 0 && dayIndex < dates.length - 1;
   const op = summary.operation ? operationStyle(summary.operation) : null;
   const opHtml = op
     ? `<p class="overlay-sub"><span class="op-badge" style="${op.style}">${escapeHtml(op.label)}</span> · ${escapeHtml(summary.statusLabel)}</p>`
@@ -818,15 +836,35 @@ async function openDaySummaryOverlay(dateStr) {
     listHtml = '<p class="overlay-sub">Rest day — no exercises logged.</p>';
   }
 
-  overlayContent.innerHTML = `
-    <p class="overlay-title">${escapeHtml(summary.dayName)}</p>
-    ${opHtml}
-    <p class="section-label">${summary.exercises.some((e) => e.logged) ? 'Logged' : 'Scheduled'}</p>
-    ${listHtml}
-    <button type="button" class="btn-secondary btn-fds-inline" id="btn-close-day-summary">Close</button>
-  `;
+  overlay.classList.add('overlay--day-summary');
   overlay.classList.remove('hidden');
+  overlayContent.innerHTML = `
+    <div class="day-summary-shell">
+      <button type="button" class="day-summary-nav day-summary-nav--prev" id="btn-day-summary-prev"
+        aria-label="Previous day" ${hasPrev ? '' : 'hidden'}>${DAY_SUMMARY_NAV_PREV}</button>
+      <div class="day-summary-content">
+        <div class="day-summary-header">
+          <p class="overlay-title">${escapeHtml(summary.dayName)}</p>
+          ${opHtml}
+          <p class="section-label">${summary.exercises.some((e) => e.logged) ? 'Logged' : 'Scheduled'}</p>
+        </div>
+        <div class="day-summary-scroll">${listHtml}</div>
+        <button type="button" class="btn-secondary btn-fds-inline" id="btn-close-day-summary">Close</button>
+      </div>
+      <button type="button" class="day-summary-nav day-summary-nav--next" id="btn-day-summary-next"
+        aria-label="Next day" ${hasNext ? '' : 'hidden'}>${DAY_SUMMARY_NAV_NEXT}</button>
+    </div>
+  `;
+
   $('#btn-close-day-summary')?.addEventListener('click', closeOverlay);
+  $('#btn-day-summary-prev')?.addEventListener('click', () => {
+    if (!hasPrev) return;
+    renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, -1));
+  });
+  $('#btn-day-summary-next')?.addEventListener('click', () => {
+    if (!hasNext) return;
+    renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, 1));
+  });
 }
 
 function isBodyweightDialValue(text) {
@@ -1055,7 +1093,14 @@ function renderTimedCountdownBlock(exercise, fields) {
   let ariaLabel = 'Start timer';
   if (phase === 'done') ariaLabel = 'Restart timer';
   else if (isActive) ariaLabel = 'Timer in progress';
-  const ringCenter = renderTimerRingCenter({ phase });
+
+  let displayTime = null;
+  if (phase === 'prep') {
+    displayTime = String(Math.ceil(remaining));
+  } else if (phase === 'running') {
+    displayTime = formatDurationClock(remaining);
+  }
+  const ringCenter = renderTimerRingCenter({ phase, displayTime });
 
   return `
     <div class="timed-countdown" id="timed-countdown">
@@ -2514,6 +2559,7 @@ function renderCentre() {
   const today = getLocalDateString();
 
   Promise.all([loadBodyMeasurements(), buildWeekStrip(today)]).then(async ([, weekStrip]) => {
+    state.weekStripDays = weekStrip;
     const bodyStatusHtml = await buildBodyStatusCardHtml();
     const missionBriefHtml = await buildMissionBriefCardHtml(state.blueprint, exerciseCount, completed, active);
     const reviewDue = isReviewWeek(week);
@@ -3482,7 +3528,7 @@ function openFdsOverlay() {
 
 function closeOverlay() {
   overlay.classList.add('hidden');
-  overlay.classList.remove('overlay--weigh-in');
+  overlay.classList.remove('overlay--weigh-in', 'overlay--day-summary');
   overlayContent.innerHTML = '';
 }
 

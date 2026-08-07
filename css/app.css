@@ -961,6 +961,87 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+.overlay--day-summary {
+  align-items: center;
+  padding: 24px 16px calc(24px + var(--safe-bottom));
+}
+
+.overlay--day-summary .overlay-panel {
+  width: min(calc(100% - 32px), 400px);
+  height: min(420px, 58dvh);
+  max-height: none;
+  border-radius: 16px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.day-summary-shell {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  position: relative;
+}
+
+.day-summary-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 36px 16px;
+}
+
+.day-summary-header {
+  flex-shrink: 0;
+}
+
+.day-summary-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 12px;
+}
+
+.day-summary-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  opacity: 0.45;
+  cursor: pointer;
+  padding: 8px 4px;
+  line-height: 0;
+}
+
+.day-summary-nav:focus-visible {
+  opacity: 0.85;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.day-summary-nav--prev {
+  left: 4px;
+}
+
+.day-summary-nav--next {
+  right: 4px;
+}
+
+.day-summary-nav-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+.day-summary-content .btn-fds-inline {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 .overlay-title {
   font-size: 16px;
   font-weight: 600;
