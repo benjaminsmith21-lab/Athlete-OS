@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS = {
   weightUnit: 'kg',
   restTimerSeconds: 60,
   showNextExerciseOnRest: true,
+  soundEnabled: true,
   restTimerSoundEnabled: true,
   autoBackupEnabled: true,
   autoBackupIntervalDays: 7,

@@ -122,8 +122,10 @@ import { getGarminCoachInsights } from './services/garminCoach.js';
 import {
   buildCampaignReviewData,
   buildWeekStrip,
+  buildDaySummary,
   isReviewWeek
 } from './services/campaignReview.js';
+import { syncWakeLockForScreen } from './services/wakeLock.js';
 import { renderGarminChartSvg, getGarminChartDateRange } from './services/garminChart.js';
 import { getProgressionHints, formatExerciseHistoryRows } from './services/progressionCoach.js';
 import { getAll } from './db.js';
@@ -165,19 +167,26 @@ const state = {
   warmupPhase: 'idle',
   warmupStepIndex: 0,
   warmupRemaining: WARMUP_DURATION_SECONDS,
-  warmupSoundPlayed: false
+  warmupSoundPlayed: false,
+  warmupEncouragementWord: null
 };
 
 let restTimerInterval = null;
 let exerciseTimerInterval = null;
 let durationTimerInterval = null;
 let warmupTimerInterval = null;
+let warmupCelebrateTimeout = null;
 let restCompleteAudio = null;
 
 const REST_COMPLETE_SOUND_LEAD_SECONDS = 3;
 const REST_COMPLETE_SOUND_URL = './assets/audio/rest-complete.wav';
 const DURATION_PREP_SECONDS = 5;
 const BODYWEIGHT_DIAL_LABEL = 'Body weight';
+const SFX_VOLUME = 0.75;
+
+const WARMUP_COMPLETE_WORDS = ['Epic!', 'Nice!', 'Strong!', 'Locked!', 'Crisp!', 'Solid!'];
+
+const TIMER_PLAY_ICON = `<svg class="timed-countdown-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>`;
 
 const WORKOUT_COMPLETE_SOUNDS = [
   './assets/audio/workout%20complete/mission-accomplished.mp3',
@@ -232,8 +241,28 @@ function clearRestTimer(stopSound = true) {
 function getRestCompleteAudio() {
   if (!restCompleteAudio) {
     restCompleteAudio = new Audio(REST_COMPLETE_SOUND_URL);
+    restCompleteAudio.volume = SFX_VOLUME;
   }
   return restCompleteAudio;
+}
+
+function isSoundEnabled() {
+  return state.settings?.soundEnabled !== false;
+}
+
+function isRestSoundEnabled() {
+  return isSoundEnabled() && state.settings?.restTimerSoundEnabled !== false;
+}
+
+function playAppSound(url) {
+  if (!isSoundEnabled()) return;
+  try {
+    const audio = new Audio(url);
+    audio.volume = SFX_VOLUME;
+    audio.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
 }
 
 function preloadRestCompleteSound() {
@@ -246,7 +275,7 @@ function preloadRestCompleteSound() {
 
 /** Unlock audio during a user gesture so delayed rest-end playback works on mobile. */
 function unlockRestCompleteSound() {
-  if (!state.settings?.restTimerSoundEnabled) return;
+  if (!isRestSoundEnabled()) return;
   try {
     const audio = getRestCompleteAudio();
     const played = audio.play();
@@ -264,7 +293,7 @@ function unlockRestCompleteSound() {
 }
 
 function playRestCompleteSound() {
-  if (!state.settings?.restTimerSoundEnabled) return;
+  if (!isRestSoundEnabled()) return;
   try {
     const audio = getRestCompleteAudio();
     audio.currentTime = 0;
@@ -285,7 +314,7 @@ function stopRestCompleteSound() {
 }
 
 function maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed) {
-  if (restSoundPlayed.value || !state.settings?.restTimerSoundEnabled) return;
+  if (restSoundPlayed.value || !isRestSoundEnabled()) return;
   const triggerAt =
     totalSeconds < REST_COMPLETE_SOUND_LEAD_SECONDS
       ? totalSeconds
@@ -297,23 +326,13 @@ function maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed) {
 }
 
 function playTimedEndSound() {
-  try {
-    const audio = new Audio(REST_COMPLETE_SOUND_URL);
-    audio.play().catch(() => {});
-  } catch {
-    /* ignore */
-  }
+  playAppSound(REST_COMPLETE_SOUND_URL);
 }
 
 function playRandomWorkoutCompleteSound() {
-  if (!WORKOUT_COMPLETE_SOUNDS.length) return;
+  if (!isSoundEnabled() || !WORKOUT_COMPLETE_SOUNDS.length) return;
   const url = WORKOUT_COMPLETE_SOUNDS[Math.floor(Math.random() * WORKOUT_COMPLETE_SOUNDS.length)];
-  try {
-    const audio = new Audio(url);
-    audio.play().catch(() => {});
-  } catch {
-    /* ignore */
-  }
+  playAppSound(url);
 }
 
 function resetDurationTimer() {
@@ -341,10 +360,15 @@ function clearExerciseTimer() {
 }
 
 function resetWarmupState() {
+  if (warmupCelebrateTimeout) {
+    clearTimeout(warmupCelebrateTimeout);
+    warmupCelebrateTimeout = null;
+  }
   state.warmupPhase = 'idle';
   state.warmupStepIndex = 0;
   state.warmupRemaining = WARMUP_DURATION_SECONDS;
   state.warmupSoundPlayed = false;
+  state.warmupEncouragementWord = null;
 }
 
 function clearWarmupTimer() {
@@ -442,24 +466,41 @@ function renderWarmupDots(activeIndex) {
   `;
 }
 
+function renderTimerRingCenter({ phase, encouragementWord = null }) {
+  if (encouragementWord) {
+    return `<span class="timed-countdown-word">${escapeHtml(encouragementWord)}</span>`;
+  }
+  if (phase === 'running' || phase === 'prep') {
+    return '';
+  }
+  return TIMER_PLAY_ICON;
+}
+
 function renderWarmupScreen() {
   const step = WARMUP_STEPS[state.warmupStepIndex];
   const unit = state.settings?.weightUnit || 'kg';
   const total = WARMUP_DURATION_SECONDS;
   const remaining = state.warmupRemaining;
+  const phase = state.warmupPhase;
   const progress =
-    state.warmupPhase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : 0;
-  const displayTime = formatDurationClock(state.warmupPhase === 'idle' ? total : remaining);
-  const isActive = state.warmupPhase === 'running';
+    phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'celebrate' ? 100 : 0;
+  const isActive = phase === 'running';
   const disabled = isActive ? 'disabled' : '';
   const activeClass = isActive ? ' timed-countdown-ring--active' : '';
-  const ariaLabel = isActive ? 'Warm-up in progress' : 'Start warm-up';
+  let ariaLabel = 'Start warm-up minute';
+  if (phase === 'running') ariaLabel = 'Warm-up in progress';
+  else if (phase === 'between') ariaLabel = 'Start next warm-up minute';
+  else if (phase === 'celebrate') ariaLabel = 'Warm-up complete';
+  const ringCenter = renderTimerRingCenter({
+    phase,
+    encouragementWord: phase === 'celebrate' ? state.warmupEncouragementWord : null
+  });
   const rx = formatWarmupStepRx(step, unit);
   const flowLines = step.isFlow ? renderWarmupFlowLines(unit) : [];
   const flowHtml = flowLines.length
     ? `<ul class="warmup-flow-lines">${flowLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
     : '';
-  const showWeightPanel = state.warmupPhase === 'idle' && state.warmupStepIndex === 0;
+  const showWeightPanel = phase === 'idle' && state.warmupStepIndex === 0;
   const weightPanelHtml = showWeightPanel ? renderWarmupWeightPanel() : '';
 
   return `
@@ -469,7 +510,7 @@ function renderWarmupScreen() {
         <div class="warmup-ring-wrap">
           <button type="button" class="timed-countdown-ring warmup-ring${activeClass}" id="btn-warmup-ring"
             aria-label="${ariaLabel}" style="--timed-progress: ${progress}%" ${disabled}>
-            <span class="timed-countdown-time">${displayTime}</span>
+            ${ringCenter}
           </button>
         </div>
         <h2 class="warmup-title">${escapeHtml(step.title)}</h2>
@@ -486,6 +527,17 @@ function renderWarmupScreen() {
 function bindWarmupControls(skipLink = true) {
   $('#btn-warmup-ring')?.addEventListener('click', () => {
     if (state.warmupPhase === 'running') return;
+    if (state.warmupPhase === 'celebrate') {
+      if (warmupCelebrateTimeout) {
+        clearTimeout(warmupCelebrateTimeout);
+        warmupCelebrateTimeout = null;
+      }
+      finishWarmup();
+      return;
+    }
+    if (state.warmupPhase === 'between') {
+      state.warmupStepIndex += 1;
+    }
     unlockRestCompleteSound();
     state.warmupPhase = 'running';
     state.warmupRemaining = WARMUP_DURATION_SECONDS;
@@ -509,10 +561,21 @@ function refreshWarmupView() {
   }
 }
 
+function startWarmupCelebration() {
+  state.warmupPhase = 'celebrate';
+  state.warmupEncouragementWord =
+    WARMUP_COMPLETE_WORDS[Math.floor(Math.random() * WARMUP_COMPLETE_WORDS.length)];
+  refreshWarmupView();
+  warmupCelebrateTimeout = setTimeout(() => {
+    warmupCelebrateTimeout = null;
+    finishWarmup();
+  }, 1500);
+}
+
 function startWarmupInterval() {
   clearWarmupTimer();
   const soundPlayed = { value: state.warmupSoundPlayed };
-  if (state.settings?.restTimerSoundEnabled) {
+  if (isRestSoundEnabled()) {
     preloadRestCompleteSound();
     maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, soundPlayed);
     state.warmupSoundPlayed = soundPlayed.value;
@@ -521,7 +584,7 @@ function startWarmupInterval() {
   warmupTimerInterval = setInterval(() => {
     state.warmupRemaining -= 1;
     const tickSound = { value: state.warmupSoundPlayed };
-    if (state.settings?.restTimerSoundEnabled) {
+    if (isRestSoundEnabled()) {
       maybePlayRestCompleteSound(state.warmupRemaining, WARMUP_DURATION_SECONDS, tickSound);
     }
     state.warmupSoundPlayed = tickSound.value;
@@ -529,15 +592,13 @@ function startWarmupInterval() {
     if (state.warmupRemaining <= 0) {
       clearWarmupTimer();
       if (state.warmupStepIndex >= WARMUP_STEPS.length - 1) {
-        finishWarmup();
+        startWarmupCelebration();
         return;
       }
-      state.warmupStepIndex += 1;
-      state.warmupRemaining = WARMUP_DURATION_SECONDS;
+      state.warmupPhase = 'between';
+      state.warmupRemaining = 0;
       state.warmupSoundPlayed = false;
-      state.warmupPhase = 'running';
       refreshWarmupView();
-      startWarmupInterval();
       return;
     }
 
@@ -568,6 +629,7 @@ function renderWarmup() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'warmup';
+  syncWakeLockForScreen('warmup');
   setHeader('Warm-up');
   resetWarmupState();
 
@@ -713,15 +775,58 @@ function renderWeekStripHtml(days) {
       ${days
         .map(
           (d) => `
-        <div class="week-strip-day ${d.isToday ? 'week-strip-day--today' : ''}">
+        <button type="button" class="week-strip-day ${d.isToday ? 'week-strip-day--today' : ''}" data-date="${d.date}"
+          aria-label="${escapeHtml(d.label)} — ${escapeHtml(d.status)}">
           <span class="week-strip-label">${d.label}</span>
-          <span class="week-dot ${statusClass[d.status] || ''}" title="${escapeHtml(d.status)}"></span>
-        </div>
+          <span class="week-dot ${statusClass[d.status] || ''}" aria-hidden="true"></span>
+        </button>
       `
         )
         .join('')}
     </div>
   `;
+}
+
+function bindWeekStripDays() {
+  document.querySelectorAll('.week-strip-day[data-date]').forEach((btn) => {
+    btn.addEventListener('click', () => openDaySummaryOverlay(btn.dataset.date));
+  });
+}
+
+async function openDaySummaryOverlay(dateStr) {
+  const unit = state.settings?.weightUnit || 'kg';
+  const summary = await buildDaySummary(dateStr);
+  const op = summary.operation ? operationStyle(summary.operation) : null;
+  const opHtml = op
+    ? `<p class="overlay-sub"><span class="op-badge" style="${op.style}">${escapeHtml(op.label)}</span> · ${escapeHtml(summary.statusLabel)}</p>`
+    : `<p class="overlay-sub">${escapeHtml(summary.statusLabel)}</p>`;
+
+  let listHtml = '';
+  if (summary.exercises.length) {
+    const items = summary.exercises
+      .map((item) => {
+        const rx = item.logged
+          ? item.detail
+          : formatPrescriptionForDisplay(item.exercise, unit) || '—';
+        return `<li><span>${escapeHtml(item.name)}</span><span class="rx">${escapeHtml(rx)}</span></li>`;
+      })
+      .join('');
+    listHtml = `<ul class="exercise-list day-summary-list">${items}</ul>`;
+  } else if (!summary.hasBlueprint) {
+    listHtml = '<p class="overlay-sub">No workout scheduled for this day.</p>';
+  } else {
+    listHtml = '<p class="overlay-sub">Rest day — no exercises logged.</p>';
+  }
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">${escapeHtml(summary.dayName)}</p>
+    ${opHtml}
+    <p class="section-label">${summary.exercises.some((e) => e.logged) ? 'Logged' : 'Scheduled'}</p>
+    ${listHtml}
+    <button type="button" class="btn-secondary btn-fds-inline" id="btn-close-day-summary">Close</button>
+  `;
+  overlay.classList.remove('hidden');
+  $('#btn-close-day-summary')?.addEventListener('click', closeOverlay);
 }
 
 function isBodyweightDialValue(text) {
@@ -944,27 +1049,19 @@ function renderTimedCountdownBlock(exercise, fields) {
   const progress =
     phase === 'running' && total > 0 ? ((total - remaining) / total) * 100 : phase === 'done' ? 100 : 0;
 
-  let displayTime = formatDurationClock(targetSeconds);
-  if (phase === 'prep') {
-    displayTime = String(Math.ceil(remaining));
-  } else if (phase === 'running') {
-    displayTime = formatDurationClock(remaining);
-  } else if (phase === 'done') {
-    displayTime = '0:00';
-  }
-
   const isActive = phase === 'prep' || phase === 'running';
   const disabled = isActive ? 'disabled' : '';
   const activeClass = isActive ? ' timed-countdown-ring--active' : '';
   let ariaLabel = 'Start timer';
   if (phase === 'done') ariaLabel = 'Restart timer';
   else if (isActive) ariaLabel = 'Timer in progress';
+  const ringCenter = renderTimerRingCenter({ phase });
 
   return `
     <div class="timed-countdown" id="timed-countdown">
       <button type="button" class="timed-countdown-ring${activeClass}" id="btn-start-duration-timer"
         aria-label="${ariaLabel}" style="--timed-progress: ${progress}%" ${disabled}>
-        <span class="timed-countdown-time">${displayTime}</span>
+        ${ringCenter}
       </button>
     </div>
   `;
@@ -1327,6 +1424,7 @@ function renderFlowCompleteScreen() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'active';
+  syncWakeLockForScreen('active');
   setHeader('Active Mission');
 
   screenRoot.innerHTML = `
@@ -1497,6 +1595,7 @@ async function renderRestTimer(totalSeconds, onDone) {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'rest';
+  syncWakeLockForScreen('rest');
   setHeader('Rest');
 
   const settings = state.settings || (await getSettings());
@@ -1522,7 +1621,7 @@ async function renderRestTimer(totalSeconds, onDone) {
     onDone();
   }
 
-  if (settings.restTimerSoundEnabled) {
+  if (isRestSoundEnabled()) {
     preloadRestCompleteSound();
     maybePlayRestCompleteSound(remaining, totalSeconds, restSoundPlayed);
   }
@@ -2054,6 +2153,7 @@ async function renderBodyComposition() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'body';
+  syncWakeLockForScreen('body');
   setHeader('Health Intelligence');
 
   await loadBodyMeasurements();
@@ -2303,6 +2403,7 @@ async function renderCampaignReview() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'review';
+  syncWakeLockForScreen('review');
   setHeader('Campaign Review');
 
   const today = getLocalDateString();
@@ -2402,6 +2503,7 @@ async function renderCampaignReview() {
 
 function renderCentre() {
   state.screen = 'centre';
+  syncWakeLockForScreen('centre');
   const completed = state.mission.status === MISSION_STATUS.COMPLETE;
   const active = state.mission.status === MISSION_STATUS.ACTIVE;
   setHeader('Command Centre');
@@ -2437,7 +2539,7 @@ function renderCentre() {
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
           <p class="campaign-meta">
             Week ${week} of ${state.campaign.durationWeeks}
-            <button type="button" class="campaign-meta-link" id="btn-campaign-review">· Campaign Review${reviewLinkSuffix}</button>
+            <span class="campaign-meta-sep">· </span><button type="button" class="campaign-meta-link" id="btn-campaign-review">Campaign Review${reviewLinkSuffix}</button>
           </p>
 
           ${weekStripHtml}
@@ -2471,6 +2573,7 @@ function renderCentre() {
     $('#btn-centre-fds')?.addEventListener('click', openFdsOverlay);
     $('#btn-centre-abort')?.addEventListener('click', openAbortOverlay);
     $('#btn-campaign-review')?.addEventListener('click', () => renderCampaignReview());
+    bindWeekStripDays();
     bindBodyStatusCard();
     bindBackupBanner();
   }).catch((err) => {
@@ -2483,6 +2586,7 @@ async function renderSettings() {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'settings';
+  syncWakeLockForScreen('settings');
   setHeader('Settings');
 
   state.settings = await getSettings();
@@ -2555,6 +2659,17 @@ async function renderSettings() {
         </div>
 
         <div class="settings-group">
+          <p class="settings-group-title">Sound</p>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">App sounds</span>
+            <button type="button" class="toggle-switch ${s.soundEnabled ? 'on' : ''}" id="toggle-sound" aria-pressed="${s.soundEnabled}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <p class="settings-hint">Sound effects play over your music. Turn off to silence all app sounds.</p>
+        </div>
+
+        <div class="settings-group">
           <p class="settings-group-title">Rest Timer (between exercises)</p>
           ${renderDialRow('Seconds', 'setting-rest', s.restTimerSeconds, { min: 0, max: 180, step: 15 })}
           <div class="settings-toggle-row">
@@ -2563,9 +2678,9 @@ async function renderSettings() {
               <span class="toggle-knob"></span>
             </button>
           </div>
-          <div class="settings-toggle-row">
+          <div class="settings-toggle-row ${s.soundEnabled ? '' : 'settings-toggle-row--disabled'}">
             <span class="settings-toggle-label">Play sound when rest ends</span>
-            <button type="button" class="toggle-switch ${s.restTimerSoundEnabled ? 'on' : ''}" id="toggle-rest-sound" aria-pressed="${s.restTimerSoundEnabled}">
+            <button type="button" class="toggle-switch ${s.restTimerSoundEnabled ? 'on' : ''}" id="toggle-rest-sound" aria-pressed="${s.restTimerSoundEnabled}" ${s.soundEnabled ? '' : 'disabled'}>
               <span class="toggle-knob"></span>
             </button>
           </div>
@@ -2647,7 +2762,14 @@ async function renderSettings() {
     renderSettings();
   });
 
+  $('#toggle-sound').addEventListener('click', async () => {
+    const next = !state.settings.soundEnabled;
+    state.settings = await saveSettings({ soundEnabled: next });
+    renderSettings();
+  });
+
   $('#toggle-rest-sound').addEventListener('click', async () => {
+    if (!state.settings.soundEnabled) return;
     const next = !state.settings.restTimerSoundEnabled;
     state.settings = await saveSettings({ restTimerSoundEnabled: next });
     renderSettings();
@@ -2906,6 +3028,7 @@ async function applyImportPreview() {
 
 function renderBriefing() {
   state.screen = 'briefing';
+  syncWakeLockForScreen('briefing');
   setHeader('Briefing');
 
   const unit = state.settings?.weightUnit || 'kg';
@@ -2973,6 +3096,7 @@ function renderBriefing() {
 async function renderActiveAtIndex(index) {
   clearRestTimer();
   state.screen = 'active';
+  syncWakeLockForScreen('active');
   setHeader('Active Mission');
 
   const flowExercises = getFlowExercises(state.mission);
@@ -3056,6 +3180,7 @@ async function renderActive() {
   clearWarmupTimer();
   state.lastRenderedExerciseId = null;
   state.screen = 'active';
+  syncWakeLockForScreen('active');
   setHeader('Active Mission');
 
   state.mission = await getMission(state.mission.id);
@@ -3142,78 +3267,49 @@ async function renderComplete(alreadyDone = false) {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'complete';
+  syncWakeLockForScreen('complete');
   setHeader('Debrief');
 
   state.setLogs = await getSetLogsForMission(state.mission.id);
-  const suggested = computeSuggestedRating(state.mission, state.setLogs);
-  state.selectedRating = state.mission.rating || suggested;
 
-  if (!alreadyDone) {
-    screenRoot.innerHTML = `
-      <div class="screen">
-        <div class="screen-scroll">
-          <div class="complete-banner">
-            <p class="complete-title">Mission Complete</p>
-            <p class="complete-sub">${state.setLogs.length} exercises logged${formatWorkoutDuration()}</p>
-          </div>
-
-          <p class="section-label">Rate This Mission</p>
-          <div class="rating-grid" id="rating-grid">
-            ${ratingButton('perfect', 'Perfect')}
-            ${ratingButton('full', 'Full')}
-            ${ratingButton('minimum', 'Minimum / FDS')}
-            ${ratingButton('recovery', 'Recovery')}
-            ${ratingButton('abandoned', 'Abandoned')}
-          </div>
-          <div id="coach-preview" class="coach-note"></div>
-        </div>
-        <div class="screen-footer">
-          <button type="button" class="btn-primary" id="btn-save-complete">Confirm & Return</button>
-        </div>
-      </div>
-    `;
-
-    bindRatingButtons();
-    updateCoachPreview();
-
-    $('#btn-save-complete').addEventListener('click', async () => {
-      state.mission = await completeMission(state.mission, state.selectedRating);
-      await updateIntegrityAfterMission(state.mission);
-      await markBackupDirty();
-      renderComplete(true);
-    });
-  } else {
-    const weekly = await getCompletedMissionsThisWeek();
-    const stats = await getWeeklyStats(weekly);
-    const integrity = await getIntegrity();
-    const note = await CoachService.getPostMissionNote(state.mission, {
-      setLogs: state.setLogs,
-      weeklyCount: stats.weeklyCount,
-      integrity
-    });
-
-    screenRoot.innerHTML = `
-      <div class="screen">
-        <div class="screen-scroll">
-          <div class="complete-banner">
-            <p class="complete-title">${ratingLabel(state.mission.rating)}</p>
-            <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}${formatWorkoutDuration()}</p>
-          </div>
-          <div class="coach-note">${escapeHtml(note)}</div>
-          <div class="integrity-bar">
-            <strong>This week</strong><br>
-            ${stats.completed} missions · ${stats.executionRate}% execution
-            ${stats.fdsThisWeek ? ` · ${stats.fdsThisWeek} FDS` : ''}
-          </div>
-        </div>
-        <div class="screen-footer">
-          <button type="button" class="btn-primary" id="btn-return-centre">Return to Command Centre</button>
-        </div>
-      </div>
-    `;
-
-    $('#btn-return-centre').addEventListener('click', () => goHome());
+  if (!alreadyDone && state.mission.status !== MISSION_STATUS.COMPLETE) {
+    const rating = computeSuggestedRating(state.mission, state.setLogs);
+    state.mission = await completeMission(state.mission, rating);
+    await updateIntegrityAfterMission(state.mission);
+    await markBackupDirty();
   }
+
+  const weekly = await getCompletedMissionsThisWeek();
+  const stats = await getWeeklyStats(weekly);
+  const integrity = await getIntegrity();
+  const note = await CoachService.getPostMissionNote(state.mission, {
+    setLogs: state.setLogs,
+    weeklyCount: stats.weeklyCount,
+    integrity
+  });
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <div class="complete-banner">
+          <p class="complete-title">Mission Complete</p>
+          <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}${formatWorkoutDuration()}</p>
+          <p class="complete-rated">Rated: ${escapeHtml(ratingLabel(state.mission.rating))}</p>
+        </div>
+        <div class="coach-note">${escapeHtml(note)}</div>
+        <div class="integrity-bar">
+          <strong>This week</strong><br>
+          ${stats.completed} missions · ${stats.executionRate}% execution
+          ${stats.fdsThisWeek ? ` · ${stats.fdsThisWeek} FDS` : ''}
+        </div>
+      </div>
+      <div class="screen-footer">
+        <button type="button" class="btn-primary" id="btn-return-centre">Return to Command Centre</button>
+      </div>
+    </div>
+  `;
+
+  $('#btn-return-centre').addEventListener('click', () => goHome());
 }
 
 function formatWorkoutDuration() {
@@ -3221,11 +3317,6 @@ function formatWorkoutDuration() {
   const end = state.mission.completedAt ? new Date(state.mission.completedAt) : new Date();
   const seconds = Math.round((end - new Date(state.mission.startedAt)) / 1000);
   return seconds > 0 ? ` · ${formatElapsed(seconds)}` : '';
-}
-
-function ratingButton(value, label) {
-  const selected = state.selectedRating === value ? 'selected' : '';
-  return `<button type="button" class="rating-btn ${selected}" data-rating="${value}">${label}</button>`;
 }
 
 function ratingLabel(rating) {
@@ -3237,32 +3328,6 @@ function ratingLabel(rating) {
     abandoned: 'Abandoned'
   };
   return labels[rating] || 'Mission Logged';
-}
-
-function bindRatingButtons() {
-  document.querySelectorAll('.rating-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.selectedRating = btn.dataset.rating;
-      document.querySelectorAll('.rating-btn').forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      updateCoachPreview();
-    });
-  });
-}
-
-async function updateCoachPreview() {
-  const el = $('#coach-preview');
-  if (!el) return;
-  const integrity = await getIntegrity();
-  const weekly = await getCompletedMissionsThisWeek();
-  const stats = await getWeeklyStats(weekly);
-  const previewMission = { ...state.mission, rating: state.selectedRating, isFds: state.selectedRating === 'minimum' };
-  const note = await CoachService.getPostMissionNote(previewMission, {
-    setLogs: state.setLogs,
-    weeklyCount: stats.weeklyCount + 1,
-    integrity
-  });
-  el.textContent = note;
 }
 
 function fdsOptionPayload(ex) {

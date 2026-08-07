@@ -15,7 +15,14 @@ import {
   getRhrSevenDayAverage,
   getSleepSevenDayAverage
 } from './garminTrend.js';
-import { getCampaignWeek } from './campaign.js';
+import { getBlueprintForDay, getCampaignWeek } from './campaign.js';
+import {
+  getSetLogsForMission,
+  formatPerformanceSummary,
+  formatExerciseName,
+  MISSION_STATUS,
+  MISSION_RATINGS
+} from './mission.js';
 
 export const REVIEW_WEEKS = [4, 8, 12];
 
@@ -214,6 +221,65 @@ export async function buildWeekStrip(endDate = getLocalDateString()) {
     });
   }
   return days;
+}
+
+const DAY_STATUS_LABELS = {
+  completed: 'Completed',
+  fds: 'FDS',
+  missed: 'Missed',
+  rest: 'Rest',
+  upcoming: 'Upcoming'
+};
+
+function dayStatusForDate(dateStr, endDate, blueprint, mission) {
+  const dow = new Date(`${dateStr}T12:00:00`).getDay();
+  if (mission?.status === MISSION_STATUS.COMPLETE) {
+    if (mission.isFds || mission.rating === MISSION_RATINGS.MINIMUM) return 'fds';
+    if (mission.rating === MISSION_RATINGS.ABANDONED) return 'missed';
+    return 'completed';
+  }
+  if (blueprint && dow >= 1 && dow <= 5 && dateStr < endDate) return 'missed';
+  if (dateStr > endDate) return 'upcoming';
+  return 'rest';
+}
+
+export async function buildDaySummary(dateStr, endDate = getLocalDateString()) {
+  const dow = new Date(`${dateStr}T12:00:00`).getDay();
+  const blueprint = await getBlueprintForDay(dow);
+  const missions = await getAll('missions');
+  const mission = missions.find((m) => m.date === dateStr);
+  const status = dayStatusForDate(dateStr, endDate, blueprint, mission);
+
+  let exercises = [];
+  if (mission?.status === MISSION_STATUS.COMPLETE) {
+    const logs = await getSetLogsForMission(mission.id);
+    exercises = logs.map((log) => {
+      const name = formatExerciseName(log.exerciseName);
+      const full = formatPerformanceSummary(log.exerciseName, log);
+      let detail = full;
+      if (full.startsWith(`${name}: `)) detail = full.slice(name.length + 2);
+      else if (full.startsWith(`${name}:`)) detail = full.slice(name.length + 1).trim();
+      return { name, detail, logged: true };
+    });
+  }
+
+  if (!exercises.length && blueprint?.exercises?.length) {
+    exercises = blueprint.exercises.map((ex) => ({
+      name: formatExerciseName(ex.name),
+      exercise: ex,
+      logged: false
+    }));
+  }
+
+  return {
+    date: dateStr,
+    dayName: blueprint?.dayName || dateStr,
+    operation: blueprint?.operation || null,
+    status,
+    statusLabel: DAY_STATUS_LABELS[status] || status,
+    exercises,
+    hasBlueprint: !!blueprint
+  };
 }
 
 export async function buildCampaignReviewData({

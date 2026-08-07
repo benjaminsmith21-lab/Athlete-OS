@@ -11,6 +11,7 @@ def test_campaign_review_exports():
         'isReviewWeek',
         'buildMilestones',
         'buildWeekStrip',
+        'buildDaySummary',
         'buildCampaignReviewData',
         'extractMaxHangSeconds',
         'extractZone2Best',

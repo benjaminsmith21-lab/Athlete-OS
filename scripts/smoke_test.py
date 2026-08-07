@@ -31,6 +31,7 @@ REQUIRED_FILES = [
     'js/services/garminTrend.js',
     'js/services/garminCoach.js',
     'js/services/campaignReview.js',
+    'js/services/wakeLock.js',
     'js/services/garminChart.js',
     'js/services/progressionCoach.js',
     'js/services/backupSnapshot.js',
@@ -67,7 +68,11 @@ def test_service_worker_cache():
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
     assert 'workout%20complete/mission-accomplished.mp3' in text
-    assert 'athlete-os-v31' in text
+    assert 'athlete-os-v32' in text
+    assert 'wakeLock.js' in text
+    assert 'soundEnabled' in (ROOT / 'js/services/settings.js').read_text(encoding='utf-8')
+    assert 'buildDaySummary' in (ROOT / 'js/services/campaignReview.js').read_text(encoding='utf-8')
+    assert 'week-strip-day[data-date]' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
     assert 'datetime.js' in text
 
 def test_manifest():
