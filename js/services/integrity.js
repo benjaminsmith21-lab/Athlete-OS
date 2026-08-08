@@ -1,6 +1,7 @@
 import { get, put, getAll } from '../db.js';
 import { getActiveCampaignId } from './campaign.js';
 import { MISSION_RATINGS, MISSION_STATUS } from './mission.js';
+import { t } from './languageStyle.js';
 
 export async function getIntegrity(campaignId = null) {
   const id = campaignId || (await getActiveCampaignId());
@@ -105,14 +106,14 @@ function getYesterday(dateStr) {
 
 export function formatIntegritySummary(integrity, weeklyStats) {
   const parts = [];
-  parts.push(`${weeklyStats.executionRate}% execution this week`);
+  parts.push(t('integrityExecutionWeek', { rate: weeklyStats.executionRate }));
   if (integrity.fdsCount > 0) {
-    parts.push(`${integrity.fdsCount} FDS total`);
+    parts.push(t('integrityFdsTotal', { count: integrity.fdsCount }));
   }
   if (integrity.consecutiveMisses >= 1) {
-    parts.push('One miss — protect the next session');
+    parts.push(t('integrityOneMiss'));
   } else if (integrity.lastMissionDate) {
-    parts.push('Integrity holding');
+    parts.push(t('integrityHolding'));
   }
   return parts.join(' · ');
 }

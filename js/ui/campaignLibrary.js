@@ -12,6 +12,7 @@ import {
 } from '../services/campaignLibrary.js';
 import { getOperationLabel } from '../services/campaignPrescription.js';
 import { getCampaignWeek } from '../services/campaign.js';
+import { t } from '../services/languageStyle.js';
 
 let screenRoot = null;
 let uiState = null;
@@ -75,7 +76,7 @@ function bindRowActions() {
 }
 
 export async function renderCampaignLibraryList() {
-  setHeader('Campaign Library');
+  setHeader(t('campaignLibrary'));
   uiState.screen = 'campaign-library';
   const grouped = await listCampaigns();
 
@@ -89,6 +90,7 @@ export async function renderCampaignLibraryList() {
       campaign,
       `
       <button type="button" class="btn-text" data-view="${campaign.id}">View</button>
+      <button type="button" class="btn-text" data-edit="${campaign.id}">Edit</button>
       <button type="button" class="btn-text" data-duplicate="${campaign.id}">Duplicate</button>
       <button type="button" class="btn-text btn-text-danger" data-end="${campaign.id}">End</button>
     `
@@ -136,7 +138,7 @@ export async function renderCampaignLibraryList() {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-scroll">
-        <p class="section-label">Campaign Library</p>
+        <p class="section-label">${t('campaignLibrary')}</p>
         ${renderFlash()}
         ${section('Active', activeRows)}
         ${section('Up Next', scheduledRows)}
@@ -145,14 +147,14 @@ export async function renderCampaignLibraryList() {
       </div>
       <div class="screen-footer">
         <button type="button" class="btn-secondary" id="btn-campaign-library-back">Back to Settings</button>
-        <button type="button" class="btn-primary" id="btn-create-campaign">+ Create Campaign</button>
+        <button type="button" class="btn-primary" id="btn-create-campaign">${t('createCampaign')}</button>
       </div>
     </div>
   `;
 
   document.getElementById('btn-campaign-library-back')?.addEventListener('click', () => renderSettings());
   document.getElementById('btn-create-campaign')?.addEventListener('click', async () => {
-    const campaign = await createCampaign({ name: 'New Campaign' });
+    const campaign = await createCampaign({ name: t('newCampaignDefault') });
     openCampaignBuilder(campaign.id);
   });
 
@@ -164,7 +166,7 @@ export async function renderCampaignLibraryList() {
   screenRoot.querySelectorAll('[data-duplicate]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await duplicateCampaign(btn.dataset.duplicate);
-      uiState.campaignLibraryFlash = 'Campaign duplicated.';
+      uiState.campaignLibraryFlash = t('campaignDuplicated');
       await renderCampaignLibraryList();
     });
   });
@@ -181,14 +183,14 @@ export async function renderCampaignLibraryList() {
   screenRoot.querySelectorAll('[data-archive]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await archiveCampaign(btn.dataset.archive);
-      uiState.campaignLibraryFlash = 'Campaign archived.';
+      uiState.campaignLibraryFlash = t('campaignArchived');
       await renderCampaignLibraryList();
     });
   });
   screenRoot.querySelectorAll('[data-unschedule]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await unscheduleCampaign(btn.dataset.unschedule);
-      uiState.campaignLibraryFlash = 'Campaign unscheduled.';
+      uiState.campaignLibraryFlash = t('campaignUnscheduled');
       await renderCampaignLibraryList();
     });
   });
@@ -197,7 +199,7 @@ export async function renderCampaignLibraryList() {
 export async function renderCampaignLibraryView(id) {
   const campaign = await getCampaign(id);
   if (!campaign) {
-    uiState.campaignLibraryFlash = 'Campaign not found.';
+    uiState.campaignLibraryFlash = t('campaignNotFound');
     return renderCampaignLibraryList();
   }
   setHeader(campaign.name);
@@ -225,7 +227,9 @@ export async function renderCampaignLibraryView(id) {
       <div class="screen-footer campaign-view-footer">
         <button type="button" class="btn-secondary" id="btn-campaign-view-back">Back</button>
         ${
-          campaign.status === CAMPAIGN_STATUS.DRAFT || campaign.status === CAMPAIGN_STATUS.SCHEDULED
+          campaign.status === CAMPAIGN_STATUS.DRAFT ||
+          campaign.status === CAMPAIGN_STATUS.SCHEDULED ||
+          campaign.status === CAMPAIGN_STATUS.ACTIVE
             ? `<button type="button" class="btn-secondary" id="btn-campaign-view-edit">Edit</button>`
             : ''
         }
@@ -246,21 +250,31 @@ export async function renderCampaignLibraryView(id) {
 export async function confirmActivateCampaign(id) {
   try {
     await activateCampaign(id, { replaceActive: false });
-    uiState.campaignLibraryFlash = 'Campaign activated.';
-    await renderCampaignLibraryList();
+    uiState.campaignLibraryFlash = t('campaignActivated');
+    return { ok: true };
   } catch (error) {
     if (error.code === 'ACTIVE_EXISTS') {
-      const replace = window.confirm(
-        'Another campaign is active. End it and activate this campaign? Historical missions will be preserved.'
-      );
-      if (replace) {
-        await activateCampaign(id, { replaceActive: true });
-        uiState.campaignLibraryFlash = 'Campaign activated.';
-        await renderCampaignLibraryList();
-      }
-      return;
+      return {
+        ok: false,
+        needsReplace: true,
+        campaignId: id,
+        activeCampaignId: error.activeCampaignId
+      };
     }
-    uiState.campaignLibraryFlash = error.details?.join(' ') || error.message;
-    await renderCampaignLibraryList();
+    const message = error.details?.join(' ') || error.message;
+    uiState.campaignLibraryFlash = message;
+    return { ok: false, error: message };
+  }
+}
+
+export async function confirmActivateCampaignReplace(id) {
+  try {
+    await activateCampaign(id, { replaceActive: true });
+    uiState.campaignLibraryFlash = t('campaignActivated');
+    return { ok: true };
+  } catch (error) {
+    const message = error.details?.join(' ') || error.message;
+    uiState.campaignLibraryFlash = message;
+    return { ok: false, error: message };
   }
 }

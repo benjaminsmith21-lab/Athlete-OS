@@ -2,6 +2,7 @@ import { OPERATIONS } from '../seed/blueprint-v1.js';
 import {
   getCampaign,
   saveCampaignDocument,
+  saveActiveCampaignEdits,
   duplicatePrescription,
   duplicateDay,
   duplicateDayToCampaign,
@@ -9,6 +10,7 @@ import {
   CAMPAIGN_STATUS,
   DAY_ORDER
 } from '../services/campaignLibrary.js';
+import { t } from '../services/languageStyle.js';
 import {
   createSection,
   dayNameFor,
@@ -20,7 +22,7 @@ import {
   validatePrescription,
   OPERATION_OTHER
 } from '../services/campaignPrescription.js';
-import { getTrackingTypeLabel, getPrescriptionFieldIds } from '../services/trackingTypes.js';
+import { getTrackingTypeLabel, getPrescriptionFieldIds, getPrescriptionFieldLabel } from '../services/trackingTypes.js';
 import { generateId } from '../db.js';
 import { openExercisePicker, showOverlayPicker, hideOverlayPicker } from './exercisePicker.js';
 
@@ -76,12 +78,27 @@ function scheduleAutosave(campaign) {
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(async () => {
     try {
-      await saveCampaignDocument(campaign);
+      if (campaign.status === CAMPAIGN_STATUS.ACTIVE) {
+        uiState.builderCampaign = await saveActiveCampaignEdits(campaign);
+      } else {
+        await saveCampaignDocument(campaign);
+      }
       setAutosaveStatus('saved');
     } catch {
       setAutosaveStatus('error');
     }
   }, 800);
+}
+
+async function flushCampaignSave(campaign) {
+  clearTimeout(autosaveTimer);
+  if (campaign.status === CAMPAIGN_STATUS.ACTIVE) {
+    uiState.builderCampaign = await saveActiveCampaignEdits(campaign);
+    return uiState.builderCampaign;
+  }
+  await saveCampaignDocument(campaign);
+  setAutosaveStatus('saved');
+  return campaign;
 }
 
 function operationOptions(selected) {
@@ -94,39 +111,78 @@ function operationOptions(selected) {
   return `${presets}<option value="${OPERATION_OTHER}" ${selected === OPERATION_OTHER ? 'selected' : ''}>Other</option>`;
 }
 
+function renderUnitSelect(field, value, options) {
+  return `
+    <select name="${field}" data-field="${field}">
+      ${options.map((opt) => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+    </select>
+  `;
+}
+
 function renderPrescriptionFields(trackingType, prescription = {}) {
   const fields = getPrescriptionFieldIds(trackingType);
   if (!fields.length) {
     return '<p class="settings-hint">No prescription fields for this tracking type.</p>';
   }
-  return fields
-    .map((field) => {
-      const value = prescription[field] ?? '';
-      if (field === 'weightUnit' || field === 'distanceUnit') {
-        const options =
-          field === 'weightUnit'
-            ? ['kg', 'lbs']
-            : ['km', 'm', 'mi'];
-        return `
-          <label class="library-field">
-            <span>${escapeHtml(field)}</span>
-            <select name="${field}" data-field="${field}">
-              ${options.map((opt) => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-            </select>
-          </label>
-        `;
-      }
-      const inputType = ['sets', 'reps', 'restSeconds', 'durationSeconds', 'weight', 'distance'].includes(field)
-        ? 'number'
-        : 'text';
-      return `
+
+  const fieldSet = new Set(fields);
+  const parts = [];
+
+  for (const field of fields) {
+    if (field === 'weightUnit' && fieldSet.has('weight')) continue;
+    if (field === 'distanceUnit' && fieldSet.has('distance')) continue;
+
+    const value = prescription[field] ?? '';
+
+    if (field === 'weight' && fieldSet.has('weightUnit')) {
+      parts.push(`
         <label class="library-field">
-          <span>${escapeHtml(field)}</span>
-          <input type="${inputType}" name="${field}" data-field="${field}" value="${escapeHtml(String(value))}">
+          <span>${escapeHtml(getPrescriptionFieldLabel('weight'))}</span>
+          <div class="library-field-row">
+            <input type="number" name="weight" data-field="weight" value="${escapeHtml(String(prescription.weight ?? ''))}">
+            ${renderUnitSelect('weightUnit', prescription.weightUnit ?? 'kg', ['kg', 'lbs'])}
+          </div>
         </label>
-      `;
-    })
-    .join('');
+      `);
+      continue;
+    }
+
+    if (field === 'distance' && fieldSet.has('distanceUnit')) {
+      parts.push(`
+        <label class="library-field">
+          <span>${escapeHtml(getPrescriptionFieldLabel('distance'))}</span>
+          <div class="library-field-row">
+            <input type="number" name="distance" data-field="distance" value="${escapeHtml(String(prescription.distance ?? ''))}">
+            ${renderUnitSelect('distanceUnit', prescription.distanceUnit ?? 'km', ['km', 'm', 'mi'])}
+          </div>
+        </label>
+      `);
+      continue;
+    }
+
+    if (field === 'weightUnit' || field === 'distanceUnit') {
+      const options = field === 'weightUnit' ? ['kg', 'lbs'] : ['km', 'm', 'mi'];
+      parts.push(`
+        <label class="library-field">
+          <span>${escapeHtml(getPrescriptionFieldLabel(field))}</span>
+          ${renderUnitSelect(field, value, options)}
+        </label>
+      `);
+      continue;
+    }
+
+    const inputType = ['sets', 'reps', 'restSeconds', 'durationSeconds', 'weight', 'distance'].includes(field)
+      ? 'number'
+      : 'text';
+    parts.push(`
+      <label class="library-field">
+        <span>${escapeHtml(getPrescriptionFieldLabel(field))}</span>
+        <input type="${inputType}" name="${field}" data-field="${field}" value="${escapeHtml(String(value))}">
+      </label>
+    `);
+  }
+
+  return parts.join('');
 }
 
 function getDay(campaign, dayOfWeek) {
@@ -185,19 +241,19 @@ function renderDayEditor(campaign, dayOfWeek) {
   return `
     <div class="builder-day-meta">
       <label class="library-field">
-        <span>Mission name</span>
+        <span>${t('missionName')}</span>
         <input type="text" id="builder-day-name" value="${escapeHtml(day.name || day.dayName)}">
       </label>
       <label class="library-field">
-        <span>Operation</span>
+        <span>${t('operation')}</span>
         <select id="builder-day-operation">${operationOptions(day.operation)}</select>
       </label>
       <label class="library-field ${day.operation === OPERATION_OTHER ? '' : 'hidden'}" id="builder-operation-custom-wrap">
-        <span>Operation name</span>
+        <span>${t('operationName')}</span>
         <input type="text" id="builder-operation-custom" value="${escapeHtml(day.operationCustom || '')}" placeholder="e.g. Hypertrophy">
       </label>
       <label class="library-field">
-        <span>Purpose</span>
+        <span>${t('purposeLabel')}</span>
         <input type="text" id="builder-day-purpose" value="${escapeHtml(day.purpose || '')}">
         <span class="settings-hint">What this day is for — e.g. "Build aerobic base" or "Heavy lower body". Shown in planning only; optional.</span>
       </label>
@@ -223,7 +279,7 @@ function renderDetailsStage(campaign) {
   return `
     <form id="builder-details-form" class="library-editor-form">
       <label class="library-field">
-        <span>Campaign name</span>
+        <span>${t('campaignName')}</span>
         <input type="text" name="name" required value="${escapeHtml(campaign.name)}">
       </label>
       <label class="library-field">
@@ -374,7 +430,7 @@ async function openDuplicateDayPicker(campaign, sourceDayOfWeek) {
       <button type="button" class="btn-text duplicate-day-advanced-toggle" id="dup-day-advanced-toggle">Copy to another campaign</button>
       <div class="duplicate-day-advanced hidden" id="dup-day-advanced">
         <label class="library-field">
-          <span>Campaign</span>
+          <span>${t('campaignLabel')}</span>
           <select id="dup-day-campaign"></select>
         </label>
         <div class="duplicate-day-grid" id="dup-day-advanced-grid">${renderDuplicateDayButtons(sourceDayOfWeek, { disableSource: false })}</div>
@@ -445,7 +501,7 @@ function openPrescriptionEditor(campaign, dayOfWeek, prescriptionId) {
       <form id="prescription-form" class="library-editor-form">
         ${renderPrescriptionFields(row.exerciseSnapshot?.trackingType, row.prescription)}
         <label class="library-field">
-          <span>Campaign notes</span>
+          <span>${t('campaignNotes')}</span>
           <input type="text" name="campaignNotes" value="${escapeHtml(row.campaignNotes || '')}">
         </label>
         <label class="library-field library-field-inline">
@@ -489,7 +545,7 @@ export async function renderCampaignBuilder(campaignId) {
   ensureBuilderState();
   const campaign = uiState.builderCampaign?.id === campaignId ? uiState.builderCampaign : await getCampaign(campaignId);
   if (!campaign) {
-    uiState.campaignLibraryFlash = 'Campaign not found.';
+    uiState.campaignLibraryFlash = t('campaignNotFound');
     return renderCampaignLibraryList();
   }
   uiState.builderCampaign = campaign;
@@ -510,13 +566,19 @@ export async function renderCampaignBuilder(campaignId) {
       ? renderDetailsStage(campaign)
       : renderDayEditor(campaign, uiState.builderDayOfWeek);
 
+  const isActive = campaign.status === CAMPAIGN_STATUS.ACTIVE;
+  const canActivate =
+    campaign.status === CAMPAIGN_STATUS.DRAFT || campaign.status === CAMPAIGN_STATUS.SCHEDULED;
+
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-scroll">
         <div class="builder-header">
-          <p class="section-label">Campaign Builder</p>
+          <p class="section-label">${t('campaignBuilder')}</p>
           <p class="builder-autosave" id="builder-autosave">${autosaveState === 'saving' ? 'Saving…' : autosaveState === 'error' ? 'Unable to save' : 'Saved'}</p>
         </div>
+        ${isActive ? `<p class="builder-active-banner">${t('builderActiveBanner')}</p>` : ''}
+        ${uiState.builderFlash ? `<p class="library-flash">${escapeHtml(uiState.builderFlash)}</p>` : ''}
         <div class="builder-stage-tabs">
           <button type="button" class="builder-stage-tab ${uiState.builderStage === 'details' ? 'builder-stage-tab--active' : ''}" data-stage="details">Details</button>
           <button type="button" class="builder-stage-tab ${uiState.builderStage === 'days' ? 'builder-stage-tab--active' : ''}" data-stage="days">Days</button>
@@ -527,8 +589,11 @@ export async function renderCampaignBuilder(campaignId) {
       <div class="screen-footer">
         <button type="button" class="btn-secondary" id="btn-builder-back">Back</button>
         ${
-          campaign.status === CAMPAIGN_STATUS.DRAFT || campaign.status === CAMPAIGN_STATUS.SCHEDULED
-            ? `<button type="button" class="btn-primary" id="btn-builder-activate">Activate</button>`
+          canActivate
+            ? `<div class="builder-activate-wrap">
+                <button type="button" class="btn-primary" id="btn-builder-activate">Activate</button>
+                <p class="builder-activate-hint">${t('builderActivateHint')}</p>
+              </div>`
             : ''
         }
       </div>
@@ -565,7 +630,9 @@ export async function renderCampaignBuilder(campaignId) {
     bindBuilderInteractions(campaign);
   }
 
-  document.getElementById('btn-builder-activate')?.addEventListener('click', () => {
+  document.getElementById('btn-builder-activate')?.addEventListener('click', async () => {
+    uiState.builderFlash = '';
+    await flushCampaignSave(campaign);
     openActivateConfirm(campaignId);
   });
 }

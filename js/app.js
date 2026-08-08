@@ -49,6 +49,15 @@ import {
   weightStep,
   bodyweightStart
 } from './services/settings.js';
+import { t, setLanguageStyle, chartRangeLabel, ratingLabelForStyle, exerciseCountLabel } from './services/languageStyle.js';
+import {
+  THEMES,
+  applyTheme,
+  markRedAlertBootPending,
+  maybeShowRedAlertBoot,
+  normalizeThemeId,
+  getThemeName
+} from './services/theme.js';
 import { getMonthHeatmapData, renderIntegrityHeatmapTile } from './services/heatmap.js';
 import {
   getAllMeasurements,
@@ -138,7 +147,8 @@ import {
   initCampaignLibraryUI,
   renderCampaignLibraryList,
   renderCampaignLibraryView,
-  confirmActivateCampaign
+  confirmActivateCampaign,
+  confirmActivateCampaignReplace
 } from './ui/campaignLibrary.js';
 import { initCampaignBuilderUI, renderCampaignBuilder } from './ui/campaignBuilder.js';
 import { initExercisePicker } from './ui/exercisePicker.js';
@@ -173,6 +183,7 @@ const state = {
   garminImportFlash: null,
   backupBanner: null,
   activeExerciseIndex: null,
+  activeSetIndex: 1,
   lastRenderedExerciseId: null,
   durationTimerPhase: 'idle',
   durationTimerRemaining: 0,
@@ -193,7 +204,9 @@ const state = {
   builderCampaignId: null,
   builderCampaign: null,
   builderDayOfWeek: 1,
-  builderStage: 'details'
+  builderStage: 'details',
+  settingsReturnScreen: null,
+  settingsReturnMeta: null
 };
 
 let restTimerInterval = null;
@@ -254,6 +267,63 @@ function operationStyle(op) {
 
 function setHeader(text) {
   headerContext.textContent = text || '';
+}
+
+function syncHomeAriaLabel() {
+  $('#btn-home')?.setAttribute('aria-label', t('returnHome'));
+}
+
+function refreshCurrentScreen() {
+  syncHomeAriaLabel();
+  const screen = state.screen;
+  switch (screen) {
+    case 'centre':
+      renderCentre();
+      break;
+    case 'settings':
+      renderSettings();
+      break;
+    case 'briefing':
+      renderBriefing();
+      break;
+    case 'warmup':
+      renderWarmup();
+      break;
+    case 'active':
+      if (state.activeExerciseIndex != null) {
+        renderActiveAtIndex(state.activeExerciseIndex);
+      } else {
+        renderCentre();
+      }
+      break;
+    case 'rest':
+      break;
+    case 'complete':
+      renderComplete(true);
+      break;
+    case 'review':
+      renderCampaignReview();
+      break;
+    case 'body':
+      renderBodyComposition();
+      break;
+    case 'exercise-library':
+      renderExerciseLibraryList();
+      break;
+    case 'campaign-library':
+      renderCampaignLibraryList();
+      break;
+    case 'campaign-view':
+      if (state.campaignLibraryViewId) renderCampaignLibraryView(state.campaignLibraryViewId);
+      else renderCampaignLibraryList();
+      break;
+    case 'campaign-builder':
+      if (state.builderCampaignId) renderCampaignBuilder(state.builderCampaignId);
+      else renderCampaignLibraryList();
+      break;
+    default:
+      renderCentre();
+  }
 }
 
 function clearRestTimer(stopSound = true) {
@@ -739,16 +809,38 @@ async function goHome() {
   renderCentre();
 }
 
+function restorePreSettingsScreen() {
+  const screen = state.settingsReturnScreen || 'centre';
+  const meta = state.settingsReturnMeta || {};
+  state.settingsReturnScreen = null;
+  state.settingsReturnMeta = null;
+  state.screen = screen;
+  if (meta.activeExerciseIndex != null) state.activeExerciseIndex = meta.activeExerciseIndex;
+  if (meta.campaignLibraryViewId) state.campaignLibraryViewId = meta.campaignLibraryViewId;
+  if (meta.builderCampaignId) state.builderCampaignId = meta.builderCampaignId;
+  refreshCurrentScreen();
+}
+
+function openSettingsFromScreen() {
+  state.settingsReturnScreen = state.screen;
+  state.settingsReturnMeta = {
+    activeExerciseIndex: state.activeExerciseIndex,
+    campaignLibraryViewId: state.campaignLibraryViewId,
+    builderCampaignId: state.builderCampaignId
+  };
+  renderSettings();
+}
+
 function toggleSettings() {
   if (state.screen === 'settings') {
-    renderCentre();
+    restorePreSettingsScreen();
     return;
   }
   if (state.screen === 'exercise-library' || state.screen === 'campaign-library' || state.screen === 'campaign-view' || state.screen === 'campaign-builder') {
     renderSettings();
     return;
   }
-  renderSettings();
+  openSettingsFromScreen();
 }
 
 async function openExerciseLibrary() {
@@ -770,15 +862,64 @@ function openCampaignBuilder(campaignId) {
 }
 
 function openCampaignView(campaignId) {
+  state.campaignLibraryViewId = campaignId;
   renderCampaignLibraryView(campaignId);
 }
 
 async function openActivateConfirm(campaignId) {
-  await confirmActivateCampaign(campaignId);
-  await reloadAppStateAfterRestore();
-  if (state.screen === 'centre' || state.mission) {
-    renderCentre();
+  const result = await confirmActivateCampaign(campaignId);
+  if (result.needsReplace) {
+    openReplaceActiveCampaignOverlay(campaignId);
+    return;
   }
+  if (!result.ok) {
+    showCampaignActionFeedback(result.error || t('couldNotActivateCampaign'));
+    return;
+  }
+  await reloadAppStateAfterRestore();
+  renderCentre();
+}
+
+function showCampaignActionFeedback(message) {
+  state.campaignLibraryFlash = message;
+  if (state.screen === 'campaign-builder' && state.builderCampaignId) {
+    state.builderFlash = message;
+    renderCampaignBuilder(state.builderCampaignId);
+    return;
+  }
+  if (state.screen === 'campaign-view' && state.campaignLibraryViewId) {
+    renderCampaignLibraryView(state.campaignLibraryViewId);
+    return;
+  }
+  renderCampaignLibraryList();
+}
+
+async function openReplaceActiveCampaignOverlay(campaignId) {
+  const incoming = await getCampaign(campaignId);
+  const activeId = state.settings?.activeCampaignId;
+  const current = activeId ? await getCampaign(activeId) : null;
+  if (!incoming) return;
+
+  overlayContent.innerHTML = `
+    <p class="overlay-title">${t('replaceActiveCampaignTitle')}</p>
+    <p class="overlay-sub">End <strong>${escapeHtml(current?.name || t('theCurrentCampaign'))}</strong> and activate <strong>${escapeHtml(incoming.name)}</strong>?</p>
+    <p class="overlay-sub">${t('replaceActiveSub')}</p>
+    <button type="button" class="btn-primary" id="btn-confirm-replace-active">Activate ${escapeHtml(incoming.name)}</button>
+    <button type="button" class="btn-secondary" id="btn-cancel-replace-active">Cancel</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-confirm-replace-active').addEventListener('click', async () => {
+    closeOverlay();
+    const replaceResult = await confirmActivateCampaignReplace(campaignId);
+    if (!replaceResult.ok) {
+      showCampaignActionFeedback(replaceResult.error || t('couldNotActivateCampaign'));
+      return;
+    }
+    await reloadAppStateAfterRestore();
+    renderCentre();
+  });
+  $('#btn-cancel-replace-active').addEventListener('click', closeOverlay);
 }
 
 async function openEndCampaignConfirm(campaignId) {
@@ -786,12 +927,12 @@ async function openEndCampaignConfirm(campaignId) {
   if (!campaign) return;
 
   overlayContent.innerHTML = `
-    <p class="overlay-title">End Campaign?</p>
-    <p class="overlay-sub">You're ending <strong>${escapeHtml(campaign.name)}</strong> as your active campaign.</p>
-    <p class="overlay-sub"><strong>Kept:</strong> all completed workouts, set logs, body data, and campaign design (moves to Archive as Completed).</p>
-    <p class="overlay-sub"><strong>Stops:</strong> today's active training plan until you activate another campaign (or duplicate/reactivate this one).</p>
-    <p class="overlay-sub"><strong>Reload:</strong> duplicate the campaign from Archive to edit and activate again; historical logs stay tied to the original.</p>
-    <button type="button" class="btn-primary btn-danger" id="btn-confirm-end-campaign">End Campaign</button>
+    <p class="overlay-title">${t('endCampaignTitle')}</p>
+    <p class="overlay-sub">${t('endCampaignSubActive', { name: campaign.name })}</p>
+    <p class="overlay-sub"><strong>Kept:</strong> ${t('endCampaignKeptBody')}</p>
+    <p class="overlay-sub"><strong>Stops:</strong> ${t('endCampaignStopsBody')}</p>
+    <p class="overlay-sub"><strong>Reload:</strong> ${t('endCampaignReloadBody')}</p>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-end-campaign">${t('endCampaign')}</button>
     <button type="button" class="btn-secondary" id="btn-cancel-end-campaign">Cancel</button>
   `;
   overlay.classList.remove('hidden');
@@ -806,13 +947,13 @@ async function confirmEndCampaign(campaignId) {
   await endCampaign(campaignId);
   if (wasActive) {
     await reloadAppStateAfterRestore();
-    state.campaignLibraryFlash = 'Campaign ended.';
+    state.campaignLibraryFlash = t('campaignEnded');
     if (state.screen === 'centre' || state.screen === 'campaign-library' || state.screen === 'campaign-view') {
       if (state.screen === 'centre') renderCentre();
       else await renderCampaignLibraryList();
     }
   } else {
-    state.campaignLibraryFlash = 'Campaign ended.';
+    state.campaignLibraryFlash = t('campaignEnded');
     await renderCampaignLibraryList();
   }
 }
@@ -991,28 +1132,27 @@ function bindDaySummarySwipe(dateStr, hasPrev, hasNext) {
   if (!shell) return;
 
   let startX = 0;
-  let startY = 0;
   let currentX = 0;
   let dragging = false;
-  let horizontal = false;
-  const threshold = 72;
+  const threshold = 48;
 
   function resetShell() {
     shell.classList.add('day-summary-shell--snap');
     shell.style.transform = '';
+    shell.style.touchAction = '';
   }
 
   function finishSwipe() {
     if (!dragging) return;
     dragging = false;
-    horizontal = false;
     shell.classList.remove('is-dragging');
+    shell.style.touchAction = '';
 
-    if (horizontal && currentX <= -threshold && hasNext) {
+    if (currentX <= -threshold && hasNext) {
       renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, 1));
       return;
     }
-    if (horizontal && currentX >= threshold && hasPrev) {
+    if (currentX >= threshold && hasPrev) {
       renderDaySummaryOverlay(adjacentWeekStripDate(dateStr, -1));
       return;
     }
@@ -1020,25 +1160,18 @@ function bindDaySummarySwipe(dateStr, hasPrev, hasNext) {
     currentX = 0;
   }
 
-  function onStart(clientX, clientY) {
+  function onStart(clientX) {
     startX = clientX;
-    startY = clientY;
     currentX = 0;
     dragging = true;
-    horizontal = false;
     shell.classList.add('is-dragging');
     shell.classList.remove('day-summary-shell--snap');
+    shell.style.touchAction = 'none';
   }
 
-  function onMove(clientX, clientY) {
+  function onMove(clientX) {
     if (!dragging) return;
-    const dx = clientX - startX;
-    const dy = clientY - startY;
-    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
-      horizontal = true;
-    }
-    if (!horizontal) return;
-    currentX = dx;
+    currentX = clientX - startX;
     shell.style.transform = `translateX(${currentX}px)`;
   }
 
@@ -1046,7 +1179,7 @@ function bindDaySummarySwipe(dateStr, hasPrev, hasNext) {
     'touchstart',
     (e) => {
       if (e.target.closest('.day-summary-nav, button, a')) return;
-      onStart(e.touches[0].clientX, e.touches[0].clientY);
+      onStart(e.touches[0].clientX);
     },
     { passive: true }
   );
@@ -1054,13 +1187,28 @@ function bindDaySummarySwipe(dateStr, hasPrev, hasNext) {
     'touchmove',
     (e) => {
       if (!dragging) return;
-      onMove(e.touches[0].clientX, e.touches[0].clientY);
-      if (horizontal) e.preventDefault();
+      onMove(e.touches[0].clientX);
+      e.preventDefault();
     },
     { passive: false }
   );
   shell.addEventListener('touchend', finishSwipe);
   shell.addEventListener('touchcancel', finishSwipe);
+
+  shell.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('.day-summary-nav, button, a')) return;
+    e.preventDefault();
+    onStart(e.clientX);
+
+    const onMouseMove = (moveEvent) => onMove(moveEvent.clientX);
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      finishSwipe();
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
 }
 
 function isBodyweightDialValue(text) {
@@ -1516,6 +1664,24 @@ function resolveFlowIndex(flowExercises, setLogs, mission, preferredIndex) {
   return firstIncomplete;
 }
 
+function getExerciseTargetSets(exercise, fields) {
+  const fromDial = getDialValue('adj-sets');
+  if (fromDial != null) return Math.max(1, Math.round(fromDial));
+  const fromFields = fields?.sets ?? exercise.sets;
+  return Math.max(1, Math.round(fromFields || 1));
+}
+
+function usesSetBySetRest(exercise, fields, settings) {
+  if (!settings?.restBetweenSetsEnabled) return false;
+  return getExerciseTargetSets(exercise, fields) > 1;
+}
+
+function getSetRestSeconds(exercise, settings) {
+  if (exercise.restSeconds != null && exercise.restSeconds > 0) return Number(exercise.restSeconds);
+  if (settings?.restBetweenSetsSeconds > 0) return settings.restBetweenSetsSeconds;
+  return 60;
+}
+
 function bindExerciseActions(exercise, flowExercises, exerciseIndex, fields) {
   state.activeExerciseFields = fields;
   bindDials(screenRoot, exercise);
@@ -1527,6 +1693,27 @@ function bindExerciseActions(exercise, flowExercises, exerciseIndex, fields) {
 
   $('#btn-complete-exercise')?.addEventListener('click', async () => {
     unlockRestCompleteSound();
+    const settings = state.settings || (await getSettings());
+    state.settings = settings;
+    const totalSets = getExerciseTargetSets(exercise, fields);
+    const setBySet = usesSetBySetRest(exercise, fields, settings);
+    const setIndex = state.activeSetIndex || 1;
+
+    if (setBySet && setIndex < totalSets) {
+      state.activeSetIndex = setIndex + 1;
+      const restSec = getSetRestSeconds(exercise, settings);
+      if (restSec > 0) {
+        renderRestTimer(restSec, () => renderActiveAtIndex(exerciseIndex), {
+          title: 'Rest between sets',
+          showNextExercise: false
+        });
+      } else {
+        await renderActiveAtIndex(exerciseIndex);
+      }
+      return;
+    }
+
+    state.activeSetIndex = 1;
     const actual = collectActualFromForm(exercise);
     await upsertExerciseLog(state.mission, exercise, actual);
     state.setLogs = await getSetLogsForMission(state.mission.id);
@@ -1540,11 +1727,11 @@ function bindExerciseActions(exercise, flowExercises, exerciseIndex, fields) {
       return;
     }
 
-    const settings = await getSettings();
-    state.settings = settings;
     const nextIndex = state.mission.currentExerciseIndex;
     if (settings.restTimerSeconds > 0) {
-      renderRestTimer(settings.restTimerSeconds, () => renderActiveAtIndex(nextIndex));
+      renderRestTimer(settings.restTimerSeconds, () => renderActiveAtIndex(nextIndex), {
+        title: 'Rest between exercises'
+      });
     } else {
       renderActiveAtIndex(nextIndex);
     }
@@ -1571,6 +1758,7 @@ function bindExerciseActions(exercise, flowExercises, exerciseIndex, fields) {
 async function navigateActiveExercise(index, flowExercises) {
   if (index < 0 || index >= flowExercises.length) return;
   clearDurationTimer();
+  state.activeSetIndex = 1;
   state.activeExerciseIndex = index;
   state.mission.currentExerciseIndex = index;
   state.mission = await saveMission(state.mission);
@@ -1627,7 +1815,7 @@ function bindExerciseSwipe(flowExercises, exerciseIndex) {
   card.addEventListener(
     'touchstart',
     (e) => {
-      if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .timed-countdown, button, input, textarea')) return;
+      if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .exercise-form-more-btn, .timed-countdown, button, input, textarea')) return;
       onStart(e.touches[0].clientX);
     },
     { passive: true }
@@ -1644,7 +1832,7 @@ function bindExerciseSwipe(flowExercises, exerciseIndex) {
   card.addEventListener('touchcancel', finishSwipe);
 
   card.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .timed-countdown, button, input, textarea')) return;
+    if (e.target.closest('.dial-btn, .exercise-note-link, .exercise-adjust-panel, .exercise-form-more-btn, .timed-countdown, button, input, textarea')) return;
     e.preventDefault();
     onStart(e.clientX);
 
@@ -1666,16 +1854,16 @@ function renderFlowCompleteScreen() {
   clearExerciseTimer();
   state.screen = 'active';
   syncWakeLockForScreen('active');
-  setHeader('Active Mission');
+  setHeader(t('activeMission'));
 
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="flow-complete-screen">
-        <p class="flow-complete-label">Today's mission</p>
+        <p class="flow-complete-label">${t('flowCompleteLabel')}</p>
         <p class="flow-complete-text">No gym exercises — you're done when your run is complete.</p>
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-primary" id="btn-finish-flow-mission">Finish Mission</button>
+        <button type="button" class="btn-primary" id="btn-finish-flow-mission">${t('finishMission')}</button>
       </div>
     </div>
   `;
@@ -1715,31 +1903,22 @@ function renderExerciseFormCues(libraryExercise) {
     previewHtml = `<p class="exercise-form-setup exercise-form-setup--preview">${escapeHtml(truncateSetup(setup))}</p>`;
   }
 
-  const hasMore = Boolean(
-    (setup && cues.length > 0) ||
-    setupNeedsExpand ||
-    hasExtraCues ||
-    commonMistakes.length
-  );
-
-  let expandedHtml = '';
-  if (hasMore) {
-    const parts = [];
-    if (setup && (cues.length > 0 || setupNeedsExpand)) {
-      parts.push(`<p class="exercise-form-setup">${escapeHtml(setup)}</p>`);
-    }
-    if (hasExtraCues) {
-      parts.push(
-        `<ul class="exercise-form-list">${cues.slice(2).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-      );
-    }
-    if (commonMistakes.length) {
-      parts.push(
-        `<p class="exercise-form-sub-label">Common mistakes</p><ul class="exercise-form-list">${commonMistakes.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-      );
-    }
-    expandedHtml = parts.join('');
+  const parts = [];
+  if (setup && (cues.length > 0 || setupNeedsExpand)) {
+    parts.push(`<p class="exercise-form-setup">${escapeHtml(setup)}</p>`);
   }
+  if (hasExtraCues) {
+    parts.push(
+      `<ul class="exercise-form-list">${cues.slice(2).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    );
+  }
+  if (commonMistakes.length) {
+    parts.push(
+      `<p class="exercise-form-sub-label">Common mistakes</p><ul class="exercise-form-list">${commonMistakes.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    );
+  }
+  const expandedHtml = parts.join('');
+  const hasMore = Boolean(expandedHtml.trim());
 
   return `
     <div class="exercise-form-cues" id="exercise-form-cues">
@@ -1757,12 +1936,13 @@ function bindExerciseFormMoreToggle() {
   const btn = document.getElementById('btn-form-more');
   const expanded = document.getElementById('exercise-form-expanded');
   const container = document.getElementById('exercise-form-cues');
+  const card = container?.closest('.exercise-card');
   if (!btn || !expanded) return;
   btn.addEventListener('click', () => {
     const isHidden = expanded.classList.contains('hidden');
     expanded.classList.toggle('hidden', !isHidden);
     btn.textContent = isHidden ? 'Less' : 'More';
-    if (container) container.classList.toggle('exercise-form-cues--expanded', isHidden);
+    card?.classList.toggle('exercise-card--form-expanded', isHidden);
   });
 }
 
@@ -1779,7 +1959,8 @@ function renderActiveExerciseBody(
   exercises = [],
   setLogs = [],
   mission = null,
-  libraryExercise = null
+  libraryExercise = null,
+  setInfo = null
 ) {
   const progress = totalExercises ? (completedCount / totalExercises) * 100 : 0;
   state.exerciseNoteDraft = fields.notes || '';
@@ -1787,7 +1968,12 @@ function renderActiveExerciseBody(
   const exerciseName = escapeHtml(formatExerciseName(exercise.name));
   const isTimed = exercise.type === 'timed';
   const cardClass = isTimed ? 'exercise-card exercise-card--timed' : 'exercise-card exercise-card--name-center';
-  const formCuesHtml = renderExerciseFormCues(libraryExercise);
+  const formCuesHtml =
+    state.settings?.showFormTips !== false ? renderExerciseFormCues(libraryExercise) : '';
+  const setLabelHtml =
+    setInfo?.setBySet && setInfo.totalSets > 1
+      ? `<p class="exercise-set-label">Set ${setInfo.setIndex} of ${setInfo.totalSets}</p>`
+      : '';
   const cardBody = isTimed
     ? `
             <h2 class="exercise-name exercise-name--header">${exerciseName}</h2>
@@ -1800,6 +1986,7 @@ function renderActiveExerciseBody(
     : `
             <div class="exercise-focus">
               <h2 class="exercise-name">${exerciseName}</h2>
+              ${setLabelHtml}
               ${formCuesHtml}
             </div>
             <div class="exercise-note-row">${renderNoteButton(state.exerciseNoteDraft)}</div>
@@ -1828,8 +2015,10 @@ function renderActiveExerciseBody(
   `;
 }
 
-function renderActiveExerciseFooter(exercise, alreadyDone = false) {
-  const label = alreadyDone ? 'Update Exercise' : 'Complete Exercise';
+function renderActiveExerciseFooter(exercise, alreadyDone = false, setInfo = null) {
+  let label = 'Complete Exercise';
+  if (alreadyDone) label = 'Update Exercise';
+  else if (setInfo?.setBySet && setInfo.setIndex < setInfo.totalSets) label = 'Complete Set';
   return `
     <button type="button" class="btn-primary" id="btn-complete-exercise">${label}</button>
     ${exercise.type === 'optional' ? '<button type="button" class="btn-secondary" id="btn-skip">Skip</button>' : ''}
@@ -1913,24 +2102,25 @@ async function afterExerciseComplete(done) {
   const settings = await getSettings();
   state.settings = settings;
   if (settings.restTimerSeconds > 0) {
-    renderRestTimer(settings.restTimerSeconds, () => renderActive());
+    renderRestTimer(settings.restTimerSeconds, () => renderActive(), { title: 'Rest between exercises' });
   } else {
     renderActive();
   }
 }
 
-async function renderRestTimer(totalSeconds, onDone) {
+async function renderRestTimer(totalSeconds, onDone, { title = 'Rest between exercises', showNextExercise = null } = {}) {
   clearRestTimer();
   clearExerciseTimer();
   state.screen = 'rest';
   syncWakeLockForScreen('rest');
-  setHeader('Rest');
+  setHeader(title);
 
   const settings = state.settings || (await getSettings());
   const unit = settings.weightUnit || 'kg';
   const flowExercises = getFlowExercises(state.mission);
   const nextIndex = state.mission.currentExerciseIndex;
-  const nextExercise = settings.showNextExerciseOnRest ? flowExercises[nextIndex] : null;
+  const shouldShowNext = showNextExercise ?? title !== 'Rest between sets';
+  const nextExercise = shouldShowNext && settings.showNextExerciseOnRest ? flowExercises[nextIndex] : null;
 
   let nextPreviewHtml = '';
   if (nextExercise) {
@@ -1963,7 +2153,7 @@ async function renderRestTimer(totalSeconds, onDone) {
     screenRoot.innerHTML = `
       <div class="screen">
         <div class="rest-screen">
-          <p class="rest-label">Rest</p>
+          <p class="rest-label">${escapeHtml(title)}</p>
           <p class="rest-countdown">${display}</p>
           <div class="rest-progress">
             <div class="rest-progress-fill" style="width:${pct}%"></div>
@@ -2025,6 +2215,13 @@ async function init() {
     }
 
     state.settings = await getSettings();
+    setLanguageStyle(state.settings.languageStyle);
+    const themeId = applyTheme(normalizeThemeId(state.settings.theme));
+    if (state.settings.theme !== themeId) {
+      state.settings = await saveSettings({ theme: themeId });
+    }
+    maybeShowRedAlertBoot(themeId);
+    syncHomeAriaLabel();
     initExerciseLibraryUI({
       screenRoot,
       uiState: state,
@@ -2093,7 +2290,7 @@ async function init() {
       if (e.target === overlay) closeOverlay();
     });
   } catch (err) {
-    console.error('Athlete OS init failed:', err);
+    console.error('Formula init failed:', err);
     renderBootError(err?.message || 'Unknown error');
   }
 }
@@ -2205,12 +2402,12 @@ async function buildMissionBriefCardHtml(blueprint, exerciseCount, completed, ac
   const meta = OPERATION_META[blueprint.operation] || { role: '', contribution: '' };
   const dayHeading = formatMissionDayHeading(new Date());
   const duration = await getMissionDurationEstimate(blueprint.dayOfWeek, blueprint.operation, exerciseCount);
-  const objectiveLabel = exerciseCount === 1 ? 'objective' : 'objectives';
+  const countLabel = exerciseCountLabel(exerciseCount);
   const operationColor = op.color || '#6b8f4e';
 
   return `
     <div class="mission-card mission-brief">
-      <p class="mission-brief-kicker">Today's Mission</p>
+      <p class="mission-brief-kicker">${t('todaysMission')}</p>
       <p class="mission-brief-date">${escapeHtml(dayHeading)}</p>
       <h2 class="mission-brief-operation" style="color: ${operationColor}">${escapeHtml(op.label.toUpperCase())}</h2>
       <div class="mission-brief-block">
@@ -2218,15 +2415,15 @@ async function buildMissionBriefCardHtml(blueprint, exerciseCount, completed, ac
         <p class="mission-brief-text">${escapeHtml(meta.role)}</p>
       </div>
       <div class="mission-brief-block">
-        <p class="mission-brief-label">Loadout</p>
-        <p class="mission-brief-text">${exerciseCount} ${objectiveLabel} · ${escapeHtml(duration.label)}</p>
+        <p class="mission-brief-label">${t('loadout')}</p>
+        <p class="mission-brief-text">${exerciseCount} ${countLabel} · ${escapeHtml(duration.label)}</p>
       </div>
       <div class="mission-brief-block">
-        <p class="mission-brief-label">Campaign Contribution</p>
+        <p class="mission-brief-label">${t('campaignContribution')}</p>
         <p class="mission-brief-text">${escapeHtml(meta.contribution)}</p>
       </div>
-      ${completed ? '<p class="status-complete">✓ Mission complete today</p>' : ''}
-      ${active && !completed ? '<p class="status-complete">Mission in progress</p>' : ''}
+      ${completed ? `<p class="status-complete">${t('missionCompleteToday')}</p>` : ''}
+      ${active && !completed ? `<p class="status-complete">${t('missionInProgress')}</p>` : ''}
     </div>
   `;
 }
@@ -2455,7 +2652,7 @@ function buildRecoverySectionHtml(dailyHealth, activities, garminSync, today) {
   const garminRangeButtons = ['30d', 'campaign', '6mo', 'all']
     .map(
       (key) =>
-        `<button type="button" class="segment-btn ${state.garminChartRange === key ? 'selected' : ''}" data-garmin-range="${key}">${key === 'campaign' ? 'Campaign' : key.toUpperCase()}</button>`
+        `<button type="button" class="segment-btn ${state.garminChartRange === key ? 'selected' : ''}" data-garmin-range="${key}">${chartRangeLabel(key)}</button>`
     )
     .join('');
 
@@ -2513,7 +2710,7 @@ async function renderBodyComposition() {
   clearExerciseTimer();
   state.screen = 'body';
   syncWakeLockForScreen('body');
-  setHeader('Health Intelligence');
+  setHeader(t('healthIntelligence'));
 
   await loadBodyMeasurements();
   const measurements = state.bodyMeasurements;
@@ -2543,7 +2740,7 @@ async function renderBodyComposition() {
   const rangeButtons = ['campaign', '30d', '6mo', '1y', 'all']
     .map(
       (key) =>
-        `<button type="button" class="segment-btn ${state.chartRange === key ? 'selected' : ''}" data-range="${key}">${key === 'campaign' ? 'Campaign' : key.toUpperCase()}</button>`
+        `<button type="button" class="segment-btn ${state.chartRange === key ? 'selected' : ''}" data-range="${key}">${chartRangeLabel(key)}</button>`
     )
     .join('');
 
@@ -2587,7 +2784,7 @@ async function renderBodyComposition() {
             <div class="body-metric-card"><span>Latest</span><strong>${latest ? `${latest.weightKg.toFixed(1)} kg` : '—'}</strong></div>
             <div class="body-metric-card"><span>7-day avg</span><strong>${formatKg(seven.average, seven.provisional)}</strong></div>
             <div class="body-metric-card"><span>30-day change</span><strong>${formatWeightChange(thirty.change)}</strong></div>
-            <div class="body-metric-card"><span>Campaign change</span><strong>${formatWeightChange(campaignChange.change)}</strong></div>
+            <div class="body-metric-card"><span>${t('campaignChange')}</span><strong>${formatWeightChange(campaignChange.change)}</strong></div>
             <div class="body-metric-card"><span>Weigh-in consistency</span><strong>${consistency}%</strong></div>
           </div>
 
@@ -2606,7 +2803,7 @@ async function renderBodyComposition() {
       </div>
       <div class="screen-footer">
         <button type="button" class="btn-primary" id="btn-log-weight-body">Log Weight</button>
-        <button type="button" class="btn-secondary" id="btn-back-centre-body">Back to Command Centre</button>
+        <button type="button" class="btn-secondary" id="btn-back-centre-body">${t('backToCommandCentre')}</button>
       </div>
     </div>
   `;
@@ -2717,7 +2914,7 @@ function openFirstRunRestoreOverlay() {
   overlayContent.innerHTML = `
     <div class="weigh-in-form">
       <p class="overlay-title">Restore your data?</p>
-      <p class="overlay-sub">If you cleared site data or reinstalled Athlete OS, import a backup file to recover your workouts, weigh-ins, and Garmin data.</p>
+      <p class="overlay-sub">If you cleared site data or reinstalled Formula, import a backup file to recover your workouts, weigh-ins, and Garmin data.</p>
       <button type="button" class="btn-primary" id="btn-first-run-import">Choose backup file</button>
       <button type="button" class="btn-secondary" id="btn-first-run-skip">Start fresh</button>
     </div>
@@ -2742,7 +2939,7 @@ function openRestoreSnapshotOverlay() {
   overlayContent.innerHTML = `
     <div class="weigh-in-form">
       <p class="overlay-title">Restore local snapshot?</p>
-      <p class="overlay-sub">This replaces all current Athlete OS data with the snapshot from ${escapeHtml(getSnapshotLabel(latest))}. Use this if a recent import went wrong.</p>
+      <p class="overlay-sub">This replaces all current Formula data with the snapshot from ${escapeHtml(getSnapshotLabel(latest))}. Use this if a recent import went wrong.</p>
       <button type="button" class="btn-primary btn-danger" id="btn-confirm-restore-snapshot">Restore snapshot</button>
       <button type="button" class="btn-secondary" id="btn-cancel-restore-snapshot">Cancel</button>
     </div>
@@ -2763,7 +2960,7 @@ async function renderCampaignReview() {
   clearExerciseTimer();
   state.screen = 'review';
   syncWakeLockForScreen('review');
-  setHeader('Campaign Review');
+  setHeader(t('campaignReview'));
 
   const today = getLocalDateString();
   const now = new Date();
@@ -2786,7 +2983,11 @@ async function renderCampaignReview() {
     endDate: today
   });
 
-  const heatmapSummary = `${review.integrity.executionRate}% execution · ${review.integrity.missionsCompleted} missions · ${review.integrity.fdsCount} FDS`;
+  const heatmapSummary = t('heatmapSummary', {
+    rate: review.integrity.executionRate,
+    count: review.integrity.missionsCompleted,
+    fds: review.integrity.fdsCount
+  });
   const heatmapHtml = renderIntegrityHeatmapTile(escapeHtml(heatmapSummary), heatmapData);
 
   const milestoneRows = review.milestones
@@ -2809,15 +3010,15 @@ async function renderCampaignReview() {
   screenRoot.innerHTML = `
     <div class="screen">
       <div class="screen-scroll">
-        <p class="section-label">Campaign Review</p>
+        <p class="section-label">${t('campaignReview')}</p>
         <h1 class="campaign-title">Week ${review.week}</h1>
         <p class="campaign-meta">${escapeHtml(formatDisplayDate(review.periodStart))} – ${escapeHtml(formatDisplayDate(review.endDate))}</p>
 
-        <p class="section-label">Integrity</p>
+        <p class="section-label">${t('integrity')}</p>
         <div class="review-metrics">
           <div class="body-metric-card"><span>Execution rate</span><strong>${review.integrity.executionRate}%</strong></div>
-          <div class="body-metric-card"><span>Missions completed</span><strong>${review.integrity.missionsCompleted}</strong></div>
-          <div class="body-metric-card"><span>FDS (period)</span><strong>${review.integrity.fdsCount}</strong></div>
+          <div class="body-metric-card"><span>${t('missionsCompleted')}</span><strong>${review.integrity.missionsCompleted}</strong></div>
+          <div class="body-metric-card"><span>${t('fdsPeriod')}</span><strong>${review.integrity.fdsCount}</strong></div>
           <div class="body-metric-card"><span>Full / perfect</span><strong>${review.integrity.fullCount}</strong></div>
         </div>
         ${heatmapHtml}
@@ -2852,7 +3053,7 @@ async function renderCampaignReview() {
         </div>
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-secondary" id="btn-back-centre-review">Back to Command Centre</button>
+        <button type="button" class="btn-secondary" id="btn-back-centre-review">${t('backToCommandCentre')}</button>
       </div>
     </div>
   `;
@@ -2865,7 +3066,7 @@ function renderCentre() {
   syncWakeLockForScreen('centre');
   const completed = state.mission.status === MISSION_STATUS.COMPLETE;
   const active = state.mission.status === MISSION_STATUS.ACTIVE;
-  setHeader('Command Centre');
+  setHeader(t('commandCentre'));
 
   const week = getCampaignWeek(state.campaign.startDate, new Date(), state.campaign.durationWeeks);
   const exerciseCount = state.blueprint.exercises.length;
@@ -2882,12 +3083,12 @@ function renderCentre() {
     const backupLineHtml = `<p class="centre-backup-line">Last backup: ${escapeHtml(lastBackupLabel)}</p>`;
     const weekStripHtml = renderWeekStripHtml(weekStrip);
 
-    let primaryLabel = 'Begin Mission';
+    let primaryLabel = t('beginMission');
     let primaryAction = () => renderBriefing();
     if (completed) {
-      primaryLabel = 'Mission Complete';
+      primaryLabel = t('missionComplete');
     } else if (active) {
-      primaryLabel = 'Resume Mission';
+      primaryLabel = t('resumeMission');
       primaryAction = () => (shouldShowWarmup() ? renderWarmup() : renderActive());
     }
 
@@ -2895,11 +3096,11 @@ function renderCentre() {
       <div class="screen">
         <div class="screen-scroll">
           ${buildBackupBannerHtml()}
-          <p class="section-label">Active Campaign</p>
+          <p class="section-label">${t('activeCampaign')}</p>
           <h1 class="campaign-title">${escapeHtml(state.campaign.name)}</h1>
           <p class="campaign-meta">
             Week ${week} of ${state.campaign.durationWeeks}
-            <span class="campaign-meta-sep">· </span><button type="button" class="campaign-meta-link" id="btn-campaign-review">Campaign Review${reviewLinkSuffix}</button>
+            <span class="campaign-meta-sep">· </span><button type="button" class="campaign-meta-link" id="btn-campaign-review">${t('campaignMetaLink')}${reviewLinkSuffix}</button>
           </p>
 
           ${weekStripHtml}
@@ -2911,9 +3112,9 @@ function renderCentre() {
               <button type="button" class="btn-primary" id="btn-begin" ${completed ? 'disabled' : ''}>
                 ${primaryLabel}
               </button>
-              ${completed ? '<button type="button" class="btn-secondary" id="btn-view-complete">View Debrief</button>' : ''}
-              ${active && !completed ? '<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">Abort Mission</button>' : ''}
-              ${!completed && !active ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">FDS Workout</button>' : ''}
+              ${completed ? `<button type="button" class="btn-secondary" id="btn-view-complete">${t('viewDebrief')}</button>` : ''}
+              ${active && !completed ? `<button type="button" class="btn-secondary btn-abort-inline" id="btn-centre-abort">${t('abortMission')}</button>` : ''}
+              ${!completed && !active ? `<button type="button" class="btn-secondary btn-fds-inline" id="btn-centre-fds">${t('fdsWorkout')}</button>` : ''}
             </div>
 
             ${bodyStatusHtml}
@@ -2938,8 +3139,58 @@ function renderCentre() {
     bindBackupBanner();
   }).catch((err) => {
     console.error('Command Centre render failed:', err);
-    renderBootError(err?.message || 'Failed to render Command Centre');
+    renderBootError(err?.message || t('renderCentreFailed'));
   });
+}
+
+async function setAppTheme(themeId) {
+  const prev = normalizeThemeId(state.settings?.theme);
+  const next = applyTheme(themeId);
+  state.settings = await saveSettings({ theme: next });
+  if (next === 'red-alert' && next !== prev) {
+    markRedAlertBootPending();
+    maybeShowRedAlertBoot(next);
+  }
+}
+
+function renderThemePickerHtml(currentTheme) {
+  return THEMES.map((theme) => `
+    <button type="button"
+      class="theme-swatch-btn ${currentTheme === theme.id ? 'selected' : ''}"
+      data-theme-id="${theme.id}"
+      aria-pressed="${currentTheme === theme.id}">
+      <span class="theme-swatch-colors" aria-hidden="true">
+        ${theme.swatch.map((color) => `<span style="background:${color}"></span>`).join('')}
+      </span>
+      <span class="theme-swatch-label">${escapeHtml(theme.name)}</span>
+    </button>
+  `).join('');
+}
+
+function renderSettingsAccordion(label, meta, bodyHtml) {
+  return `
+    <details class="settings-group settings-accordion">
+      <summary class="settings-accordion-summary">
+        <span class="settings-accordion-label">${escapeHtml(label)}</span>
+        <span class="settings-accordion-meta">${escapeHtml(meta)}</span>
+      </summary>
+      <div class="settings-accordion-body">
+        ${bodyHtml}
+      </div>
+    </details>
+  `;
+}
+
+function renderAboutBodyHtml() {
+  return `
+    <div class="settings-about">
+      <p class="settings-about-lead">Trust what you've already decided.</p>
+      <p>Progress rarely comes from one perfect workout. It comes from small actions repeated consistently over time.</p>
+      <p>Like compound interest, or a river slowly shaping stone, the biggest changes often come from what seems insignificant in the moment.</p>
+      <p>This app exists to remove unnecessary decisions, help you follow the plan you've chosen, and let consistency do its work.</p>
+      <p class="settings-about-signoff">Built by Ben, shared with people he loves.</p>
+    </div>
+  `;
 }
 
 async function renderSettings() {
@@ -3006,68 +3257,23 @@ async function renderSettings() {
       ).join('')
     : '<p class="settings-empty">No completed workouts yet.</p>';
 
-  screenRoot.innerHTML = `
-    <div class="screen">
-      <div class="screen-scroll">
-        <div class="settings-group">
-          <p class="settings-group-title">Weight Unit</p>
-          <div class="segmented-control">
-            <button type="button" class="segment-btn ${s.weightUnit === 'kg' ? 'selected' : ''}" data-unit="kg">kg</button>
-            <button type="button" class="segment-btn ${s.weightUnit === 'lbs' ? 'selected' : ''}" data-unit="lbs">lbs</button>
-          </div>
-          <p class="settings-hint">Applies to weight dials and prescriptions.</p>
-        </div>
+  const appearanceMeta = getThemeName(s.theme);
+  const completedWorkoutsMeta = history.length
+    ? `${history.length} workout${history.length === 1 ? '' : 's'}`
+    : 'None yet';
+  const backupMeta = `Last export: ${lastBackupLabel}`;
 
-        <div class="settings-group">
-          <p class="settings-group-title">Sound</p>
-          <div class="settings-toggle-row">
-            <span class="settings-toggle-label">App sounds</span>
-            <button type="button" class="toggle-switch ${s.soundEnabled ? 'on' : ''}" id="toggle-sound" aria-pressed="${s.soundEnabled}">
-              <span class="toggle-knob"></span>
-            </button>
+  const appearanceBodyHtml = `
+          <div class="theme-grid">
+            ${renderThemePickerHtml(normalizeThemeId(s.theme))}
           </div>
-          <p class="settings-hint">Sound effects play over your music. Turn off to silence all app sounds.</p>
-        </div>
+          <p class="settings-hint">Tap a theme to apply instantly. Works offline.</p>`;
 
-        <div class="settings-group">
-          <p class="settings-group-title">Rest Timer (between exercises)</p>
-          ${renderDialRow('Seconds', 'setting-rest', s.restTimerSeconds, { min: 0, max: 180, step: 15 })}
-          <div class="settings-toggle-row">
-            <span class="settings-toggle-label">Show next exercise during rest</span>
-            <button type="button" class="toggle-switch ${s.showNextExerciseOnRest ? 'on' : ''}" id="toggle-next-exercise" aria-pressed="${s.showNextExerciseOnRest}">
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-          <div class="settings-toggle-row ${s.soundEnabled ? '' : 'settings-toggle-row--disabled'}">
-            <span class="settings-toggle-label">Play sound when rest ends</span>
-            <button type="button" class="toggle-switch ${s.restTimerSoundEnabled ? 'on' : ''}" id="toggle-rest-sound" aria-pressed="${s.restTimerSoundEnabled}" ${s.soundEnabled ? '' : 'disabled'}>
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-        </div>
+  const completedWorkoutsBodyHtml = `
+          <p class="settings-hint">${t('completedWorkoutsHint')}</p>
+          <div class="workout-history-list">${historyHtml}</div>`;
 
-        <div class="settings-group">
-          <p class="settings-group-title">Training</p>
-          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-campaign-library">Campaign Library</button>
-          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-exercise-library">Exercise Library</button>
-          <p class="settings-hint">Create campaigns, browse exercises, and plan your training season.</p>
-        </div>
-
-        <div class="settings-group">
-          <p class="settings-group-title">Garmin Data</p>
-          <div class="garmin-sync-card">
-            <p class="garmin-sync-label">Status</p>
-            <p class="garmin-sync-status ${garminSync.lastError ? 'garmin-sync-status--error' : ''}">${escapeHtml(garminStatus)}</p>
-            ${garminStatusHtml}
-            ${garminFlash}
-            <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-garmin">${garminImportLabel}</button>
-            <input type="file" id="import-garmin-file" accept=".json,application/json" hidden>
-            ${garminSync.lastSuccessAt ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-view-garmin">Open Health Intelligence</button>' : ''}
-          </div>
-        </div>
-
-        <div class="settings-group">
-          <p class="settings-group-title">Data & Backup</p>
+  const backupBodyHtml = `
           <div class="backup-status-card">
             <p class="backup-status-line">${escapeHtml(backupStatusLine)}</p>
             <p class="backup-status-sub">Last file export: ${escapeHtml(lastBackupLabel)}</p>
@@ -3091,22 +3297,130 @@ async function renderSettings() {
           ${backupSnapshots.length ? '<button type="button" class="btn-secondary btn-fds-inline" id="btn-restore-snapshot">Restore local snapshot</button>' : ''}
           <button type="button" class="btn-secondary btn-fds-inline" id="btn-export-body-csv">Export body measurements CSV</button>
           <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-body-csv">Import body measurements CSV</button>
-          <input type="file" id="import-body-csv-file" accept=".csv,text/csv" hidden>
+          <input type="file" id="import-body-csv-file" accept=".csv,text/csv" hidden>`;
+
+  screenRoot.innerHTML = `
+    <div class="screen">
+      <div class="screen-scroll">
+        <div class="settings-group">
+          <p class="settings-group-title">Rest between exercises</p>
+          ${renderDialRow('Seconds', 'setting-rest', s.restTimerSeconds, { min: 0, max: 180, step: 15 })}
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">Show next exercise during rest</span>
+            <button type="button" class="toggle-switch ${s.showNextExerciseOnRest ? 'on' : ''}" id="toggle-next-exercise" aria-pressed="${s.showNextExerciseOnRest}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <div class="settings-toggle-row ${s.soundEnabled ? '' : 'settings-toggle-row--disabled'}">
+            <span class="settings-toggle-label">Play sound when rest ends</span>
+            <button type="button" class="toggle-switch ${s.restTimerSoundEnabled ? 'on' : ''}" id="toggle-rest-sound" aria-pressed="${s.restTimerSoundEnabled}" ${s.soundEnabled ? '' : 'disabled'}>
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
         </div>
 
         <div class="settings-group">
-          <p class="settings-group-title">Completed Workouts</p>
-          <p class="settings-hint">Remove logged missions. Deletes set data and calendar entry.</p>
-          <div class="workout-history-list">${historyHtml}</div>
+          <p class="settings-group-title">Rest between sets</p>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">Enable rest timer between sets</span>
+            <button type="button" class="toggle-switch ${s.restBetweenSetsEnabled ? 'on' : ''}" id="toggle-rest-between-sets" aria-pressed="${s.restBetweenSetsEnabled}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          ${s.restBetweenSetsEnabled ? renderDialRow('Default seconds', 'setting-rest-sets', s.restBetweenSetsSeconds, { min: 0, max: 300, step: 15 }) : ''}
+          <p class="settings-hint">Uses each exercise's prescribed rest when set. This default applies when none is specified.</p>
         </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Sound</p>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">App sounds</span>
+            <button type="button" class="toggle-switch ${s.soundEnabled ? 'on' : ''}" id="toggle-sound" aria-pressed="${s.soundEnabled}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <p class="settings-hint">Sound effects play over your music. Turn off to silence all app sounds.</p>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">${t('languageStyleTitle')}</p>
+          <div class="language-style-grid">
+            <div class="segmented-control">
+              <button type="button" class="segment-btn ${s.languageStyle !== 'standard' ? 'selected' : ''}" data-language-style="tactical">${t('languageStyleTactical')}</button>
+              <button type="button" class="segment-btn ${s.languageStyle === 'standard' ? 'selected' : ''}" data-language-style="standard">${t('languageStyleStandard')}</button>
+            </div>
+            <div class="language-style-hints">
+              <p class="settings-hint">${t('languageStyleTacticalHint')}</p>
+              <p class="settings-hint">${t('languageStyleStandardHint')}</p>
+            </div>
+          </div>
+        </div>
+
+        ${renderSettingsAccordion('Appearance', appearanceMeta, appearanceBodyHtml)}
+
+        <div class="settings-group">
+          <p class="settings-group-title">Training</p>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-campaign-library">${t('trainingLibraryButton')}</button>
+          <button type="button" class="btn-secondary btn-fds-inline" id="btn-open-exercise-library">Exercise Library</button>
+          <p class="settings-hint">${t('trainingSettingsHint')}</p>
+          <div class="settings-subsection">
+            <p class="settings-subsection-title">Weight unit</p>
+            <div class="segmented-control">
+              <button type="button" class="segment-btn ${s.weightUnit === 'kg' ? 'selected' : ''}" data-unit="kg">kg</button>
+              <button type="button" class="segment-btn ${s.weightUnit === 'lbs' ? 'selected' : ''}" data-unit="lbs">lbs</button>
+            </div>
+            <p class="settings-hint">Applies to weight dials and prescriptions.</p>
+          </div>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-label">Show form tips during exercises</span>
+            <button type="button" class="toggle-switch ${s.showFormTips !== false ? 'on' : ''}" id="toggle-form-tips" aria-pressed="${s.showFormTips !== false}">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <p class="settings-hint">Shows setup and technique cues on the exercise card when available from the library.</p>
+        </div>
+
+        <div class="settings-group">
+          <p class="settings-group-title">Garmin Data</p>
+          <div class="garmin-sync-card">
+            <p class="garmin-sync-label">Status</p>
+            <p class="garmin-sync-status ${garminSync.lastError ? 'garmin-sync-status--error' : ''}">${escapeHtml(garminStatus)}</p>
+            ${garminStatusHtml}
+            ${garminFlash}
+            <button type="button" class="btn-secondary btn-fds-inline" id="btn-import-garmin">${garminImportLabel}</button>
+            <input type="file" id="import-garmin-file" accept=".json,application/json" hidden>
+            ${garminSync.lastSuccessAt ? `<button type="button" class="btn-secondary btn-fds-inline" id="btn-view-garmin">${t('openHealthIntelligence')}</button>` : ''}
+          </div>
+        </div>
+
+        ${renderSettingsAccordion('Completed Workouts', completedWorkoutsMeta, completedWorkoutsBodyHtml)}
+
+        ${renderSettingsAccordion('Data & Backup', backupMeta, backupBodyHtml)}
+
+        ${renderSettingsAccordion('About', 'Formula', renderAboutBodyHtml())}
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-secondary" id="btn-settings-back">Back to Command Centre</button>
+        <button type="button" class="btn-secondary" id="btn-settings-back">${t('backToCommandCentre')}</button>
       </div>
     </div>
   `;
 
   bindDials(screenRoot);
+
+  document.querySelectorAll('.theme-swatch-btn[data-theme-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await setAppTheme(btn.dataset.themeId);
+      renderSettings();
+    });
+  });
+
+  document.querySelectorAll('.segment-btn[data-language-style]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.settings = await saveSettings({ languageStyle: btn.dataset.languageStyle });
+      setLanguageStyle(state.settings.languageStyle);
+      refreshCurrentScreen();
+    });
+  });
 
   document.querySelectorAll('.segment-btn[data-unit]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -3135,11 +3449,31 @@ async function renderSettings() {
     renderSettings();
   });
 
+  $('#toggle-form-tips')?.addEventListener('click', async () => {
+    const next = state.settings.showFormTips === false;
+    state.settings = await saveSettings({ showFormTips: next });
+    refreshCurrentScreen();
+  });
+
   $('#toggle-rest-sound').addEventListener('click', async () => {
     if (!state.settings.soundEnabled) return;
     const next = !state.settings.restTimerSoundEnabled;
     state.settings = await saveSettings({ restTimerSoundEnabled: next });
     renderSettings();
+  });
+
+  $('#toggle-rest-between-sets')?.addEventListener('click', async () => {
+    const next = !state.settings.restBetweenSetsEnabled;
+    state.settings = await saveSettings({ restBetweenSetsEnabled: next });
+    renderSettings();
+  });
+
+  screenRoot.querySelector('[data-id="setting-rest-sets"]')?.querySelectorAll('.dial-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      const val = getDialValue('setting-rest-sets') ?? 0;
+      state.settings = await saveSettings({ restBetweenSetsSeconds: val });
+    });
   });
 
   $('#toggle-auto-backup')?.addEventListener('click', async () => {
@@ -3398,7 +3732,7 @@ async function applyImportPreview() {
 function renderBriefing() {
   state.screen = 'briefing';
   syncWakeLockForScreen('briefing');
-  setHeader('Briefing');
+  setHeader(t('briefing'));
 
   const unit = state.settings?.weightUnit || 'kg';
   const exerciseCount = state.blueprint.exercises.length;
@@ -3428,21 +3762,32 @@ function renderBriefing() {
         ? '<p class="section-label">Progression Notes</p>'
         : '';
 
+      const identityHtml = note
+        ? `<div class="identity-block">"${escapeHtml(note)}"</div>`
+        : '';
+
+      const progressionRule = state.campaign.progressionRules?.[0];
+      const nutritionRule = state.campaign.nutrition?.[0];
+      const footerHtml =
+        progressionRule || nutritionRule
+          ? `<div class="brief-footer">
+              ${progressionRule ? `<strong>Progression:</strong> ${escapeHtml(progressionRule)}<br>` : ''}
+              ${nutritionRule ? `<strong>Fuel:</strong> ${escapeHtml(nutritionRule)}` : ''}
+            </div>`
+          : '';
+
       screenRoot.innerHTML = `
         <div class="screen">
           <div class="screen-scroll">
-            <div class="identity-block">"${escapeHtml(note)}"</div>
+            ${identityHtml}
 
             ${missionBriefHtml}
 
-            <p class="section-label">Mission Loadout</p>
+            <p class="section-label">${t('missionLoadout')}</p>
             <ul class="exercise-list">${exerciseItems}</ul>
             ${hintsSection}
 
-            <div class="brief-footer">
-              <strong>Progression:</strong> ${escapeHtml(state.campaign.progressionRules[0])}<br>
-              <strong>Fuel:</strong> ${escapeHtml(state.campaign.nutrition[0])}
-            </div>
+            ${footerHtml}
           </div>
           <div class="screen-footer">
             <button type="button" class="btn-primary" id="btn-start">Start</button>
@@ -3456,9 +3801,16 @@ function renderBriefing() {
         state.setLogs = [];
         state.checklistDone = new Set();
         state.activeExerciseIndex = 0;
-        renderWarmup();
+        if (shouldShowWarmup()) {
+          renderWarmup();
+        } else {
+          renderActive();
+        }
       });
       $('#btn-back-centre').addEventListener('click', () => renderCentre());
+  }).catch((err) => {
+    console.error('Briefing render failed:', err);
+    renderBootError(err?.message || 'Failed to load workout overview.');
   });
 }
 
@@ -3466,7 +3818,7 @@ async function renderActiveAtIndex(index) {
   clearRestTimer();
   state.screen = 'active';
   syncWakeLockForScreen('active');
-  setHeader('Active Mission');
+  setHeader(t('activeMission'));
 
   const flowExercises = getFlowExercises(state.mission);
   if (!flowExercises.length) {
@@ -3485,6 +3837,7 @@ async function renderActiveAtIndex(index) {
   if (state.lastRenderedExerciseId !== exercise.id) {
     clearDurationTimer();
     state.lastRenderedExerciseId = exercise.id;
+    state.activeSetIndex = 1;
   }
   if (exerciseTimerInterval) {
     clearInterval(exerciseTimerInterval);
@@ -3509,6 +3862,13 @@ async function renderActiveAtIndex(index) {
     await recordRecentExercise(libraryExercise.id);
   }
 
+  const settings = state.settings || (await getSettings());
+  state.settings = settings;
+  const totalSets = getExerciseTargetSets(exercise, fields);
+  const setBySet = usesSetBySetRest(exercise, fields, settings);
+  const setIndex = state.activeSetIndex || 1;
+  const setInfo = { setIndex, totalSets, setBySet };
+
   const bodyHtml = renderActiveExerciseBody(
     exercise,
     prev,
@@ -3522,7 +3882,8 @@ async function renderActiveAtIndex(index) {
     flowExercises,
     state.setLogs,
     state.mission,
-    libraryExercise
+    libraryExercise,
+    setInfo
   );
 
   const screenBody = $('.screen-body');
@@ -3530,7 +3891,7 @@ async function renderActiveAtIndex(index) {
   if (screenBody && screenFooter && state.screen === 'active') {
     screenBody.classList.add('screen-body--active');
     screenBody.innerHTML = bodyHtml;
-    screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone);
+    screenFooter.innerHTML = renderActiveExerciseFooter(exercise, alreadyDone, setInfo);
     bindExerciseActions(exercise, flowExercises, flowIndex, fields);
     bindExerciseFormMoreToggle();
     return;
@@ -3542,7 +3903,7 @@ async function renderActiveAtIndex(index) {
         ${bodyHtml}
       </div>
       <div class="screen-footer">
-        ${renderActiveExerciseFooter(exercise, alreadyDone)}
+        ${renderActiveExerciseFooter(exercise, alreadyDone, setInfo)}
       </div>
     </div>
   `;
@@ -3558,7 +3919,7 @@ async function renderActive() {
   state.lastRenderedExerciseId = null;
   state.screen = 'active';
   syncWakeLockForScreen('active');
-  setHeader('Active Mission');
+  setHeader(t('activeMission'));
 
   state.mission = await getMission(state.mission.id);
   state.setLogs = await getSetLogsForMission(state.mission.id);
@@ -3618,7 +3979,7 @@ function renderChecklistActive(exercises) {
         ${items}
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-primary" id="btn-finish-checklist">Finish Mission</button>
+        <button type="button" class="btn-primary" id="btn-finish-checklist">${t('finishMission')}</button>
       </div>
     </div>
   `;
@@ -3645,7 +4006,7 @@ async function renderComplete(alreadyDone = false) {
   clearExerciseTimer();
   state.screen = 'complete';
   syncWakeLockForScreen('complete');
-  setHeader('Debrief');
+  setHeader(t('debrief'));
 
   state.setLogs = await getSetLogsForMission(state.mission.id);
 
@@ -3669,19 +4030,19 @@ async function renderComplete(alreadyDone = false) {
     <div class="screen">
       <div class="screen-scroll">
         <div class="complete-banner">
-          <p class="complete-title">Mission Complete</p>
+          <p class="complete-title">${t('missionComplete')}</p>
           <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}${formatWorkoutDuration()}</p>
           <p class="complete-rated">Rated: ${escapeHtml(ratingLabel(state.mission.rating))}</p>
         </div>
         <div class="coach-note">${escapeHtml(note)}</div>
         <div class="integrity-bar">
           <strong>This week</strong><br>
-          ${stats.completed} missions · ${stats.executionRate}% execution
-          ${stats.fdsThisWeek ? ` · ${stats.fdsThisWeek} FDS` : ''}
+          ${t('thisWeekStats', { count: stats.completed, rate: stats.executionRate })}
+          ${stats.fdsThisWeek ? t('thisWeekFds', { count: stats.fdsThisWeek }) : ''}
         </div>
       </div>
       <div class="screen-footer">
-        <button type="button" class="btn-primary" id="btn-return-centre">Return to Command Centre</button>
+        <button type="button" class="btn-primary" id="btn-return-centre">${t('returnToCommandCentre')}</button>
       </div>
     </div>
   `;
@@ -3697,14 +4058,7 @@ function formatWorkoutDuration() {
 }
 
 function ratingLabel(rating) {
-  const labels = {
-    perfect: 'Perfect Mission',
-    full: 'Full Mission',
-    minimum: 'Minimum — FDS',
-    recovery: 'Recovery Mission',
-    abandoned: 'Abandoned'
-  };
-  return labels[rating] || 'Mission Logged';
+  return ratingLabelForStyle(rating);
 }
 
 function fdsOptionPayload(ex) {
@@ -3746,11 +4100,11 @@ function renderFdsOverlayContent() {
   const count = state.fdsSelection.length;
 
   overlayContent.innerHTML = `
-    <p class="overlay-title">FDS — Do Something</p>
+    <p class="overlay-title">${t('fdsOverlayTitle')}</p>
     <p class="overlay-sub">Pick 1–3 exercises. Tap in the order you want to do them.</p>
     ${optionsHtml}
     <button type="button" class="btn-primary" id="btn-start-fds" ${count ? '' : 'disabled'}>
-      Start FDS${count ? ` (${count})` : ''}
+      ${t('startFds')}${count ? ` (${count})` : ''}
     </button>
     <button type="button" class="btn-secondary" id="btn-cancel-fds">Cancel</button>
   `;
@@ -3791,7 +4145,31 @@ async function startFdsMission() {
   state.mission.skippedExercises = [];
   state.mission = await saveMission(state.mission);
   state.setLogs = [];
-  renderWarmup();
+  openFdsWarmupPrompt();
+}
+
+function openFdsWarmupPrompt() {
+  overlayContent.innerHTML = `
+    <p class="overlay-title">${t('fdsWarmupTitle')}</p>
+    <p class="overlay-sub">${t('fdsWarmupBody')}</p>
+    <button type="button" class="btn-primary" id="btn-fds-warmup-yes">${t('fdsWarmupYes')}</button>
+    <button type="button" class="btn-secondary" id="btn-fds-warmup-skip">${t('fdsWarmupSkip')}</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  $('#btn-fds-warmup-yes').addEventListener('click', () => {
+    closeOverlay();
+    renderWarmup();
+  });
+  $('#btn-fds-warmup-skip').addEventListener('click', () => skipFdsWarmupAndStart());
+}
+
+async function skipFdsWarmupAndStart() {
+  closeOverlay();
+  state.mission.warmupCompletedAt = new Date().toISOString();
+  state.mission = await saveMission(state.mission);
+  state.activeExerciseIndex = 0;
+  renderActive();
 }
 
 function openDeleteWorkoutOverlay(missionId) {
@@ -3828,9 +4206,9 @@ async function confirmDeleteWorkout(missionId) {
 
 function openAbortOverlay() {
   overlayContent.innerHTML = `
-    <p class="overlay-title">Abort Mission?</p>
+    <p class="overlay-title">${t('abortMissionTitle')}</p>
     <p class="overlay-sub">This cancels today's in-progress workout. Nothing will be logged for today.</p>
-    <button type="button" class="btn-primary btn-danger" id="btn-confirm-abort">Abort Mission</button>
+    <button type="button" class="btn-primary btn-danger" id="btn-confirm-abort">${t('abortMission')}</button>
     <button type="button" class="btn-secondary" id="btn-cancel-abort">Keep Going</button>
   `;
   overlay.classList.remove('hidden');

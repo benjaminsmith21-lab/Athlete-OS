@@ -18,6 +18,7 @@ import {
 } from '../services/exercisePreferences.js';
 import { parseLineList, parseCommaList } from '../services/exerciseSchema.js';
 import { TRACKING_TYPE_IDS, TRACKING_TYPES } from '../services/trackingTypes.js';
+import { t } from '../services/languageStyle.js';
 import { EXERCISE_CATEGORIES, EQUIPMENT_OPTIONS } from '../services/equipment.js';
 
 const FILTER_CHIPS = [
@@ -255,7 +256,7 @@ export async function renderExerciseLibraryDetail(id) {
     <div class="screen">
       <div class="screen-scroll field-manual">
         <div class="field-manual-head">
-          <p class="section-label">${exercise.isCustom ? 'Custom Exercise' : 'Field Manual'}</p>
+          <p class="section-label">${exercise.isCustom ? 'Custom Exercise' : t('fieldManual')}</p>
           <div class="field-manual-title-row">
             <h1 class="library-title">${escapeHtml(exercise.name)}</h1>
             <button type="button" class="library-fav-btn library-fav-btn--large ${favorite ? 'library-fav-btn--active' : ''}" id="btn-detail-fav" aria-label="Toggle favourite">${favorite ? '★' : '☆'}</button>

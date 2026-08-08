@@ -2,6 +2,7 @@ import {
   getTrackingTypeConfig,
   getMissionType,
   getPrescriptionFieldIds,
+  getPrescriptionFieldLabel,
   isValidTrackingType
 } from './trackingTypes.js';
 import { WARMUP_DURATION_SECONDS } from '../seed/warmup-v1.js';
@@ -145,18 +146,19 @@ export function validatePrescription(trackingType, prescription = {}) {
 
   for (const field of fields) {
     if (optionalFields.has(field)) continue;
+    const label = getPrescriptionFieldLabel(field);
     const value = prescription[field];
     if (value == null || value === '') {
-      errors.push(`Missing ${field}.`);
+      errors.push(`Missing ${label}.`);
       continue;
     }
     if (['sets', 'reps', 'restSeconds', 'durationSeconds'].includes(field)) {
       const num = Number(value);
-      if (!Number.isFinite(num) || num <= 0) errors.push(`${field} must be a positive number.`);
+      if (!Number.isFinite(num) || num <= 0) errors.push(`${label} must be a positive number.`);
     }
     if (['weight', 'distance'].includes(field)) {
       const num = Number(value);
-      if (!Number.isFinite(num) || num < 0) errors.push(`${field} must be zero or greater.`);
+      if (!Number.isFinite(num) || num < 0) errors.push(`${label} must be zero or greater.`);
     }
   }
   return errors;

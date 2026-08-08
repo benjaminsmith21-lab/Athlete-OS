@@ -1,5 +1,6 @@
 import { getAll } from '../db.js';
 import { MISSION_STATUS } from './mission.js';
+import { t, ratingLabelForStyle } from './languageStyle.js';
 
 const RATING_LEVEL = {
   perfect: 3,
@@ -7,14 +8,6 @@ const RATING_LEVEL = {
   recovery: 2,
   minimum: 1,
   abandoned: 0
-};
-
-const RATING_LABEL = {
-  perfect: 'Perfect',
-  full: 'Full',
-  recovery: 'Recovery',
-  minimum: 'FDS',
-  abandoned: 'Abandoned'
 };
 
 export async function getMonthHeatmapData(year, month) {
@@ -51,7 +44,7 @@ export async function getMonthHeatmapData(year, month) {
       day,
       level: rating ? RATING_LEVEL[rating] ?? 0 : 0,
       rating,
-      label: rating ? RATING_LABEL[rating] : null,
+      label: rating ? ratingLabelForStyle(rating) : null,
       isToday: date === todayStr
     });
   }
@@ -82,7 +75,7 @@ export function renderIntegrityHeatmapTile(integritySummary, data) {
   return `
     <div class="integrity-tile">
       <div class="integrity-tile-summary">
-        <strong>Integrity</strong>
+        <strong>${t('integrity')}</strong>
         <span>${integritySummary}</span>
       </div>
       <p class="integrity-tile-month">${data.monthName} ${data.year}</p>
@@ -90,7 +83,7 @@ export function renderIntegrityHeatmapTile(integritySummary, data) {
       <div class="heatmap-legend">
         <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l3"></span> Full</span>
         <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l2"></span> Partial</span>
-        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l1"></span> FDS</span>
+        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l1"></span> ${t('fds')}</span>
       </div>
     </div>
   `;
@@ -118,7 +111,7 @@ export function renderHeatmapHtml(data) {
       <div class="heatmap-legend">
         <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l3"></span> Full</span>
         <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l2"></span> Partial</span>
-        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l1"></span> FDS</span>
+        <span class="heatmap-legend-item"><span class="heatmap-cell heatmap-l1"></span> ${t('fds')}</span>
       </div>
     </div>
   `;

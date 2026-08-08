@@ -22,6 +22,7 @@ import {
   getSleepSevenDayAverage
 } from './garminTrend.js';
 import { getBlueprintForDay, getCampaignWeek } from './campaign.js';
+import { getDayStatusLabel } from './languageStyle.js';
 
 export const REVIEW_WEEKS = [4, 8, 12];
 
@@ -224,11 +225,15 @@ export async function buildWeekStrip(endDate = getLocalDateString()) {
 
 const DAY_STATUS_LABELS = {
   completed: 'Completed',
-  fds: 'FDS',
   missed: 'Missed',
   rest: 'Rest',
   upcoming: 'Upcoming'
 };
+
+function dayStatusLabel(status) {
+  if (status === 'fds') return getDayStatusLabel('fds');
+  return DAY_STATUS_LABELS[status] || status;
+}
 
 function dayStatusForDate(dateStr, endDate, blueprint, mission) {
   const dow = new Date(`${dateStr}T12:00:00`).getDay();
@@ -275,7 +280,7 @@ export async function buildDaySummary(dateStr, endDate = getLocalDateString()) {
     dayName: blueprint?.dayName || dateStr,
     operation: blueprint?.operation || null,
     status,
-    statusLabel: DAY_STATUS_LABELS[status] || status,
+    statusLabel: dayStatusLabel(status),
     exercises,
     hasBlueprint: !!blueprint
   };

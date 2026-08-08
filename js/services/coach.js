@@ -1,9 +1,10 @@
 import { MISSION_RATINGS } from './mission.js';
+import { t } from './languageStyle.js';
 
 export const CoachService = {
   async getBriefingNote(campaign) {
-    const identity = campaign.identity[Math.floor(Math.random() * campaign.identity.length)];
-    return identity;
+    if (!campaign?.identity?.length) return '';
+    return campaign.identity[Math.floor(Math.random() * campaign.identity.length)];
   },
 
   async getPostMissionNote(mission, context = {}) {
@@ -14,23 +15,23 @@ export const CoachService = {
         .map((e) => e.name)
         .filter(Boolean);
       const label = names.length > 1 ? names.join(', ') : names[0] || 'one thing';
-      return `FDS today — ${label}. Integrity preserved. Not a zero day. Return tomorrow.`;
+      return t('coachFds', { label });
     }
 
     if (mission.rating === MISSION_RATINGS.ABANDONED) {
-      return 'Mission abandoned. One miss is data. Two in a row breaks the identity line. Return when ready.';
+      return t('coachAbandoned');
     }
 
     if (mission.rating === MISSION_RATINGS.RECOVERY) {
-      return `Partial mission. ${setLogs.length} entries logged. Consistency over perfection.`;
+      return t('coachPartial', { count: setLogs.length });
     }
 
     const lines = [];
 
     if (mission.rating === MISSION_RATINGS.PERFECT) {
-      lines.push('Perfect mission. Full execution including optional work.');
+      lines.push(t('coachPerfect'));
     } else if (mission.rating === MISSION_RATINGS.FULL) {
-      lines.push('Full mission. All required work complete.');
+      lines.push(t('coachFull'));
     }
 
     if (weeklyCount > 0) {
@@ -48,10 +49,10 @@ export const CoachService = {
     }
 
     if (integrity.consecutiveMisses === 0 && integrity.lastMissionDate) {
-      lines.push('Never miss two in a row — holding the line.');
+      lines.push(t('coachNeverMissTwo'));
     }
 
-    return lines.length ? lines.join(' ') : 'Mission logged. Quiet progress.';
+    return lines.length ? lines.join(' ') : t('coachLogged');
   },
 
   async getAiDebrief() {

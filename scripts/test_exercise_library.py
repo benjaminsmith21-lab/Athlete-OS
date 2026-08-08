@@ -95,6 +95,7 @@ def test_schema_and_preferences():
     assert 'MAX_RECENT_EXERCISES' in prefs
     assert 'favoriteExerciseIds' in settings
     assert 'recentExerciseIds' in settings
+    assert 'showFormTips: true' in settings
 
 
 def test_search_metadata_in_seed():
@@ -136,7 +137,8 @@ def test_app_wires_library_ui():
     assert 'recordRecentExercise' in picker
     assert 'partitionExerciseSections' in picker
     assert '.exercise-form-cues' in css
-    assert '.exercise-form-cues--expanded' in css
+    assert '.exercise-card--form-expanded' in css
+    assert '.exercise-name + .exercise-set-label' in css
     assert '.library-fav-btn' in css
 
 
@@ -147,6 +149,9 @@ def test_form_cues_render_logic():
     assert 'cues.slice(0, 2)' in app
     assert 'truncateSetup' in app
     assert 'commonMistakes' in app
+    assert 'Boolean(expandedHtml.trim())' in app
+    assert 'showFormTips' in app
+    assert 'toggle-form-tips' in app
     assert 'if (!cues.length) return' not in app
 
 
@@ -169,7 +174,7 @@ def test_progression_uses_library_map():
 
 def test_sw_version():
     sw = (ROOT / 'sw.js').read_text(encoding='utf-8')
-    assert 'athlete-os-v57' in sw
+    assert 'athlete-os-v64' in sw
     assert 'exerciseSearch.js' in sw
     assert 'exerciseSchema.js' in sw
 

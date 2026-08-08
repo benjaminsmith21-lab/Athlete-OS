@@ -125,7 +125,7 @@ export async function shareBackupFile(data, filename) {
   const blob = createBackupBlob(data);
   const file = new File([blob], filename, { type: 'application/json' });
   if (!navigator.canShare?.({ files: [file] })) return false;
-  await navigator.share({ files: [file], title: 'Athlete OS backup' });
+  await navigator.share({ files: [file], title: 'Formula backup' });
   return true;
 }
 

@@ -1,5 +1,6 @@
 import { formatExerciseName } from './mission.js';
 import { getLibraryIdForLegacyInstance } from '../seed/exercise-library-v1.js';
+import { t } from './languageStyle.js';
 
 const TIMED_LIBRARY_IDS = new Set(['ring-hangs']);
 const WEIGHTED_LIBRARY_IDS = new Set(['goblet-squat', 'row', 'halos']);
@@ -53,7 +54,7 @@ export function getProgressionHints(exercise, recentLogs = []) {
       hints.push({
         type: 'no_action',
         title: 'Zone 2 baseline building',
-        message: `${withPace.length} logged runs with distance and duration. Compare pace in Campaign Review every 4 weeks.`,
+        message: `${withPace.length} logged runs with distance and duration. ${t('progressionReviewHint')}`,
         confidence: 0.7
       });
     }

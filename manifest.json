@@ -1,11 +1,11 @@
 {
-  "name": "Athlete OS",
-  "short_name": "AthleteOS",
-  "description": "Personal operating system for athletic development",
+  "name": "Formula",
+  "short_name": "Formula",
+  "description": "Personal training app for workouts, progress, and recovery",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#1a1c1e",
-  "theme_color": "#1a1c1e",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "orientation": "portrait",
   "icons": [
     {

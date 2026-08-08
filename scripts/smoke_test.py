@@ -52,6 +52,7 @@ REQUIRED_FILES = [
     'assets/audio/workout complete/mission-accomplished-well-done-toy-story-disney-sergeant-r-lee-ermey-good-job-success-complete.mp3',
     'icons/icon-192.png',
     'icons/icon-512.png',
+    'icons/icon.svg',
 ]
 
 def test_local_files():
@@ -78,7 +79,7 @@ def test_service_worker_cache():
     assert 'backupScheduler.js' in text
     assert 'rest-complete.wav' in text
     assert 'workout%20complete/mission-accomplished.mp3' in text
-    assert 'athlete-os-v53' in text
+    assert 'athlete-os-v64' in text
     assert 'campaignLibrary.js' in text
     assert 'bindDaySummarySwipe' in (ROOT / 'js/app.js').read_text(encoding='utf-8')
     assert 'seedExerciseLibraryIfNeeded' in (ROOT / 'js/app.js').read_text(encoding='utf-8')

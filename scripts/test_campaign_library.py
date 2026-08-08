@@ -36,11 +36,33 @@ def test_campaign_library_service():
         'duplicateDayToCampaign',
         'duplicatePrescription',
         'activateCampaign',
+        'saveActiveCampaignEdits',
         'migrateLegacyCampaignIfNeeded',
         'CAMPAIGN_STATUS',
         'listEditableCampaigns'
     ]:
         assert symbol in text, f'Missing {symbol}'
+
+
+def test_campaign_ux_fixes():
+    app = (ROOT / 'js/app.js').read_text(encoding='utf-8')
+    library = (ROOT / 'js/ui/campaignLibrary.js').read_text(encoding='utf-8')
+    builder = (ROOT / 'js/ui/campaignBuilder.js').read_text(encoding='utf-8')
+    tracking = (ROOT / 'js/services/trackingTypes.js').read_text(encoding='utf-8')
+    settings = (ROOT / 'js/services/settings.js').read_text(encoding='utf-8')
+    css = (ROOT / 'css/app.css').read_text(encoding='utf-8')
+    assert 'confirmActivateCampaignReplace' in library
+    assert 'needsReplace' in library
+    assert 'openReplaceActiveCampaignOverlay' in app
+    assert 'restBetweenSetsEnabled' in settings
+    assert 'Complete Set' in app
+    assert 'getPrescriptionFieldLabel' in tracking
+    assert 'Rest between sets (sec)' in tracking
+    assert 'library-field-row' in builder
+    assert 'saveActiveCampaignEdits' in builder
+    assert 'builder-active-banner' in css
+    assert 'currentX <= -threshold && hasNext' in app
+    assert 'horizontal = false' not in app.split('function bindDaySummarySwipe')[1].split('function bindExerciseSwipe')[0]
 
 
 def test_builder_ux_polish():
@@ -96,6 +118,7 @@ if __name__ == '__main__':
     test_tracking_types_extended()
     test_campaign_prescription_exports()
     test_campaign_library_service()
+    test_campaign_ux_fixes()
     test_db_and_settings()
     test_backup_schema()
     test_ui_modules()

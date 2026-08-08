@@ -8,6 +8,8 @@ export const DEFAULT_SETTINGS = {
   scheduledCampaignId: null,
   weightUnit: 'kg',
   restTimerSeconds: 60,
+  restBetweenSetsEnabled: false,
+  restBetweenSetsSeconds: 60,
   showNextExerciseOnRest: true,
   soundEnabled: true,
   restTimerSoundEnabled: true,
@@ -22,7 +24,10 @@ export const DEFAULT_SETTINGS = {
     flowKg: 24
   },
   favoriteExerciseIds: [],
-  recentExerciseIds: []
+  recentExerciseIds: [],
+  languageStyle: 'standard',
+  theme: 'command-centre',
+  showFormTips: true
 };
 
 const KG_TO_LBS = 2.20462;

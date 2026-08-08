@@ -134,6 +134,22 @@ export async function saveCampaignDocument(campaign) {
   return next;
 }
 
+export async function saveActiveCampaignEdits(campaign) {
+  if (campaign.status !== CAMPAIGN_STATUS.ACTIVE) {
+    return saveCampaignDocument(campaign);
+  }
+  const next = stampCampaign(campaign, {
+    executionSnapshot: {
+      version: campaign.executionSnapshot?.version || 1,
+      activatedAt: campaign.executionSnapshot?.activatedAt || getLocalISOString(),
+      weeklyMissions: structuredClone(campaign.weeklyMissions)
+    }
+  });
+  await put('campaigns', next);
+  await writeCompiledBlueprints(next);
+  return next;
+}
+
 export async function deleteCampaign(id) {
   const campaign = await getCampaign(id);
   if (!campaign) return null;

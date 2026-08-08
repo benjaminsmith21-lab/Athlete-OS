@@ -1,10 +1,12 @@
-const CACHE_NAME = 'athlete-os-v57';
+const CACHE_NAME = 'athlete-os-v64';
 
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './css/app.css',
+  './css/themes.css',
+  './fonts/PressStart2P-Regular.woff2',
   './js/app.js',
   './js/db.js',
   './js/utils/datetime.js',
@@ -34,6 +36,8 @@ const ASSETS = [
   './js/services/coach.js',
   './js/services/integrity.js',
   './js/services/settings.js',
+  './js/services/theme.js',
+  './js/services/languageStyle.js',
   './js/services/heatmap.js',
   './js/services/bodyMeasurement.js',
   './js/services/bodyTrend.js',
@@ -64,7 +68,8 @@ const ASSETS = [
   './assets/audio/workout%20complete/red-alert2-victory.mp3',
   './assets/audio/workout%20complete/mission-accomplished-well-done-toy-story-disney-sergeant-r-lee-ermey-good-job-success-complete.mp3',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/icon.svg'
 ];
 
 self.addEventListener('message', (event) => {

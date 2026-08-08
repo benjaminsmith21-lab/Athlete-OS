@@ -6,17 +6,27 @@
   <meta name="theme-color" content="#1a1c1e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Athlete OS">
+  <meta name="apple-mobile-web-app-title" content="Formula">
   <meta http-equiv="Cache-Control" content="no-cache">
-  <title>Athlete OS</title>
+  <title>Formula</title>
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem('athlete-os-theme') || 'command-centre';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
   <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/themes.css">
 </head>
 <body>
   <div id="app">
     <header class="app-header">
-      <button type="button" class="app-logo" id="btn-home" aria-label="Return to Command Centre">ATHLETE OS</button>
+      <button type="button" class="app-logo" id="btn-home" aria-label="Return to Command Centre">&#402;</button>
       <span id="header-context" class="header-context"></span>
       <button type="button" id="btn-settings" class="btn-settings" aria-label="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

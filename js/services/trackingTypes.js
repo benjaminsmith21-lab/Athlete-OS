@@ -92,3 +92,18 @@ export function getTrackingTypeLabel(trackingType) {
 export function getPrescriptionFieldIds(trackingType) {
   return getTrackingTypeConfig(trackingType)?.fields || [];
 }
+
+export const PRESCRIPTION_FIELD_LABELS = {
+  weight: 'Weight',
+  weightUnit: 'Unit',
+  sets: 'Sets',
+  reps: 'Reps',
+  restSeconds: 'Rest between sets (sec)',
+  durationSeconds: 'Duration (sec)',
+  distance: 'Distance',
+  distanceUnit: 'Unit'
+};
+
+export function getPrescriptionFieldLabel(fieldId) {
+  return PRESCRIPTION_FIELD_LABELS[fieldId] || fieldId;
+}

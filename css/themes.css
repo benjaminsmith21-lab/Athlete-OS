@@ -1,0 +1,665 @@
+@font-face {
+  font-family: 'Press Start 2P';
+  src: url('../fonts/PressStart2P-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─── Command Centre (default) ─── */
+[data-theme="command-centre"] {
+  --color-bg: #1a1c1e;
+  --color-surface: #232629;
+  --color-surface-elevated: #2c3034;
+  --color-text: #e8eaed;
+  --color-text-muted: #8a9299;
+  --color-accent: #c4923a;
+  --color-effort: #c4923a;
+  --color-recovery: #6b8f4e;
+  --color-warning: #e0a040;
+  --color-danger: #a85454;
+  --accent-dim: #8a6728;
+  --on-accent: #1a1c1e;
+  --border: #3a3f44;
+  --border-subtle: #32373c;
+  --bg-hover: #33383d;
+  --chart-garmin: #3d8b8b;
+}
+
+[data-theme="command-centre"] .mission-card.mission-brief {
+  border-left: 3px solid var(--color-accent);
+}
+
+/* ─── Iron & Chalk ─── */
+[data-theme="iron-and-chalk"] {
+  --color-bg: #141312;
+  --color-surface: #1e1c1a;
+  --color-surface-elevated: #282522;
+  --color-text: #eceae4;
+  --color-text-muted: #9a958c;
+  --color-accent: #b87333;
+  --color-effort: #d4845a;
+  --color-recovery: #5a6b52;
+  --color-warning: #c9954a;
+  --color-danger: #a85454;
+  --accent-dim: #8a5528;
+  --on-accent: #141312;
+  --border: #3a3530;
+  --border-subtle: #302b27;
+  --bg-hover: #322e2a;
+  --chart-garmin: #5a8a7a;
+  --font-display: 'Arial Black', Gadget, sans-serif;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-progress: 0;
+}
+
+[data-theme="iron-and-chalk"] .exercise-card,
+[data-theme="iron-and-chalk"] .mission-card,
+[data-theme="iron-and-chalk"] .heatmap,
+[data-theme="iron-and-chalk"] .body-status-card,
+[data-theme="iron-and-chalk"] .integrity-tile {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  border-width: 1.5px;
+}
+
+/* ─── Track Club ─── */
+[data-theme="track-club"] {
+  --color-bg: #1c1f24;
+  --color-surface: #252931;
+  --color-surface-elevated: #2e333d;
+  --color-text: #f2f4f7;
+  --color-text-muted: #8a919c;
+  --color-accent: #e8c547;
+  --color-effort: #e05252;
+  --color-recovery: #4a9e8e;
+  --color-warning: #e8a030;
+  --color-danger: #c04040;
+  --accent-dim: #a89030;
+  --on-accent: #1c1f24;
+  --border: #3d4450;
+  --border-subtle: #343a44;
+  --bg-hover: #363c48;
+  --chart-garmin: #4a9e8e;
+  --font-display: 'Franklin Gothic Medium', 'Arial Narrow', sans-serif;
+  --radius-dot: 2px;
+}
+
+[data-theme="track-club"] .exercise-card,
+[data-theme="track-club"] .mission-card,
+[data-theme="track-club"] .heatmap,
+[data-theme="track-club"] .body-status-card,
+[data-theme="track-club"] .integrity-tile,
+[data-theme="track-club"] .week-strip {
+  border-style: dashed;
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--border));
+}
+
+[data-theme="track-club"] .week-dot {
+  border-radius: var(--radius-dot);
+}
+
+/* ─── Ma ─── */
+[data-theme="ma"] {
+  --color-bg: #f5f2eb;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #faf8f4;
+  --color-text: #1a1a18;
+  --color-text-muted: #6b6b66;
+  --color-accent: #c0392b;
+  --color-effort: #c0392b;
+  --color-recovery: #6b7f6a;
+  --color-warning: #b8860b;
+  --color-danger: #a04040;
+  --accent-dim: #8a2a20;
+  --on-accent: #ffffff;
+  --border: rgba(26, 26, 24, 0.12);
+  --border-subtle: rgba(26, 26, 24, 0.08);
+  --bg-hover: #f0ece4;
+  --chart-garmin: #5a8a8a;
+  --font-display: 'Yu Mincho', 'Times New Roman', serif;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="ma"] .exercise-card,
+[data-theme="ma"] .mission-card,
+[data-theme="ma"] .heatmap,
+[data-theme="ma"] .body-status-card,
+[data-theme="ma"] .integrity-tile {
+  box-shadow: none;
+  border-width: 1px;
+}
+
+[data-theme="ma"] .screen-body--active .exercise-card {
+  position: relative;
+}
+
+[data-theme="ma"] .screen-body--active .exercise-card::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+[data-theme="ma"] .progress-bar {
+  height: 3px;
+  border-radius: 0;
+}
+
+[data-theme="ma"] .progress-fill {
+  border-radius: 0;
+}
+
+[data-theme="ma"] .overlay {
+  background: rgba(26, 26, 24, 0.45);
+}
+
+/* ─── Poster Brut ─── */
+[data-theme="poster-brut"] {
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-elevated: #1a1a1a;
+  --color-text: #fafafa;
+  --color-text-muted: #888888;
+  --color-accent: #ff4d00;
+  --color-effort: #ff4d00;
+  --color-recovery: #ffffff;
+  --color-warning: #ffcc00;
+  --color-danger: #ff2020;
+  --accent-dim: #cc3d00;
+  --on-accent: #0a0a0a;
+  --border: #333333;
+  --border-subtle: #222222;
+  --bg-hover: #1f1f1f;
+  --chart-garmin: #cccccc;
+  --font-display: Impact, 'Arial Black', sans-serif;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-progress: 0;
+  --radius-dot: 0;
+}
+
+[data-theme="poster-brut"] .section-label,
+[data-theme="poster-brut"] .settings-group-title,
+[data-theme="poster-brut"] .rest-label,
+[data-theme="poster-brut"] .flow-complete-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+[data-theme="poster-brut"] .btn-primary {
+  box-shadow: 4px 4px 0 var(--color-accent);
+  border-radius: 0;
+}
+
+[data-theme="poster-brut"] .btn-primary:active {
+  box-shadow: 2px 2px 0 var(--color-accent);
+  transform: translate(2px, 2px);
+}
+
+[data-theme="poster-brut"] .heatmap-cell {
+  border-radius: 0;
+}
+
+[data-theme="poster-brut"] .rest-countdown {
+  font-size: 72px;
+}
+
+/* ─── Vitals ─── */
+[data-theme="vitals"] {
+  --color-bg: #0b1117;
+  --color-surface: #121a22;
+  --color-surface-elevated: #182028;
+  --color-text: #d8e8f0;
+  --color-text-muted: #6a8494;
+  --color-accent: #00bcd4;
+  --color-effort: #00e5ff;
+  --color-recovery: #78909c;
+  --color-warning: #ffb74d;
+  --color-danger: #ef5350;
+  --accent-dim: #00838f;
+  --on-accent: #0b1117;
+  --border: #243040;
+  --border-subtle: #1a2834;
+  --bg-hover: #1e2834;
+  --chart-garmin: #00bcd4;
+  --font-display: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+}
+
+[data-theme="vitals"] .section-label,
+[data-theme="vitals"] .settings-group-title {
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+
+[data-theme="vitals"] .progress-fill {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-effort) 0,
+    var(--color-effort) 6px,
+    transparent 6px,
+    transparent 10px
+  );
+  background-size: 20px 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme="vitals"] .progress-fill {
+    animation: vitalsTrace 1.2s linear infinite;
+  }
+}
+
+@keyframes vitalsTrace {
+  from { background-position: 0 0; }
+  to { background-position: 20px 0; }
+}
+
+[data-theme="vitals"] .rest-countdown {
+  letter-spacing: 0.05em;
+}
+
+/* ─── Goldeneye ─── */
+[data-theme="goldeneye"] {
+  --color-bg: #0c100c;
+  --color-surface: #121a12;
+  --color-surface-elevated: #1a241a;
+  --color-text: #6b9460;
+  --color-text-muted: #4a6844;
+  --color-accent: #8fd464;
+  --color-effort: #b8ff78;
+  --color-recovery: #5eb8d4;
+  --color-warning: #e8a030;
+  --color-danger: #d84848;
+  --color-hud-blue: #6ec8e8;
+  --accent-dim: #6a9a48;
+  --on-accent: #0c100c;
+  --border: #2a382a;
+  --border-subtle: #1f2a1f;
+  --bg-hover: #1a241a;
+  --chart-garmin: #6ec8e8;
+  --font-display: 'Press Start 2P', 'Courier New', monospace;
+  --font-data: 'Consolas', 'Courier New', monospace;
+  --ease: step-end;
+  --duration: 80ms;
+  --duration-fast: 0ms;
+  --duration-slow: 80ms;
+}
+
+[data-theme="goldeneye"] .app-logo {
+  font-size: 14px;
+  line-height: 1;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+}
+
+[data-theme="goldeneye"] .section-label,
+[data-theme="goldeneye"] .settings-group-title,
+[data-theme="goldeneye"] .rest-label,
+[data-theme="goldeneye"] .flow-complete-label {
+  font-size: 8px;
+  line-height: 1.6;
+  color: var(--color-accent);
+}
+
+[data-theme="goldeneye"] .mission-brief-kicker,
+[data-theme="goldeneye"] .mission-brief-label {
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1.6;
+  color: var(--color-accent);
+}
+
+[data-theme="goldeneye"] .mission-brief-operation {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+[data-theme="goldeneye"] .mission-brief-date {
+  font-family: var(--font-display);
+  font-size: 7px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+[data-theme="goldeneye"] .mission-brief .status-complete {
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--color-effort);
+  margin-top: 12px;
+}
+
+[data-theme="goldeneye"] .week-strip-label {
+  font-family: var(--font-display);
+  font-size: 7px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+}
+
+[data-theme="goldeneye"] .exercise-name {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-accent);
+}
+
+[data-theme="goldeneye"] .campaign-title {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-accent);
+}
+
+[data-theme="goldeneye"] .exercise-card,
+[data-theme="goldeneye"] .mission-card,
+[data-theme="goldeneye"] .heatmap,
+[data-theme="goldeneye"] .body-status-card,
+[data-theme="goldeneye"] .integrity-tile {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+}
+
+[data-theme="goldeneye"] .screen-body--active .exercise-card {
+  position: relative;
+}
+
+[data-theme="goldeneye"] .screen-body--active .exercise-card::before,
+[data-theme="goldeneye"] .screen-body--active .exercise-card::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-effort);
+  pointer-events: none;
+}
+
+[data-theme="goldeneye"] .screen-body--active .exercise-card::before {
+  top: 8px;
+  left: 8px;
+  border-right: none;
+  border-bottom: none;
+}
+
+[data-theme="goldeneye"] .screen-body--active .exercise-card::after {
+  bottom: 8px;
+  right: 8px;
+  border-left: none;
+  border-top: none;
+}
+
+[data-theme="goldeneye"] .timed-countdown-ring {
+  border-radius: 4px;
+  clip-path: polygon(
+    8px 0, calc(100% - 8px) 0, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px), 0 8px
+  );
+}
+
+[data-theme="goldeneye"] .timed-countdown-ring::before {
+  border-radius: 2px;
+}
+
+[data-theme="goldeneye"] .btn-primary,
+[data-theme="goldeneye"] .btn-secondary,
+[data-theme="goldeneye"] .btn-abort,
+[data-theme="goldeneye"] .btn-abort-inline,
+[data-theme="goldeneye"] .btn-fds,
+[data-theme="goldeneye"] .btn-fds-inline,
+[data-theme="goldeneye"] .btn-danger {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  line-height: 1.5;
+  border-radius: 4px;
+}
+
+[data-theme="goldeneye"] .btn-primary {
+  font-size: 10px;
+  background: var(--color-effort);
+  color: var(--on-accent);
+  border: 2px solid var(--color-accent);
+  transition: background var(--duration-fast) step-end, border-color var(--duration-fast) step-end, filter var(--duration-fast) step-end;
+}
+
+[data-theme="goldeneye"] .btn-primary:active {
+  opacity: 1;
+  filter: brightness(0.92);
+}
+
+[data-theme="goldeneye"] .btn-secondary,
+[data-theme="goldeneye"] .btn-abort,
+[data-theme="goldeneye"] .btn-abort-inline,
+[data-theme="goldeneye"] .btn-fds,
+[data-theme="goldeneye"] .btn-fds-inline,
+[data-theme="goldeneye"] .btn-danger {
+  font-size: 8px;
+}
+
+[data-theme="goldeneye"] .btn-secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+[data-theme="goldeneye"] .btn-abort,
+[data-theme="goldeneye"] .btn-abort-inline {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+
+[data-theme="goldeneye"] .btn-fds,
+[data-theme="goldeneye"] .btn-fds-inline {
+  border-color: var(--accent-dim);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+[data-theme="goldeneye"] .btn-danger {
+  background: var(--color-danger);
+  color: var(--on-accent);
+  border: 2px solid color-mix(in srgb, var(--color-danger) 70%, #000);
+}
+
+[data-theme="goldeneye"] .rest-countdown {
+  color: var(--color-recovery);
+}
+
+[data-theme="goldeneye"] .rest-ring {
+  border-top-color: var(--color-recovery);
+}
+
+[data-theme="goldeneye"] .rest-progress-fill {
+  background: var(--color-recovery);
+}
+
+[data-theme="goldeneye"] .body-status-value {
+  color: var(--color-hud-blue);
+}
+
+[data-theme="goldeneye"] .body-status-label {
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-size: 7px;
+  line-height: 1.6;
+}
+
+[data-theme="goldeneye"] .week-dot--done {
+  background: var(--color-effort);
+}
+
+[data-theme="goldeneye"] .week-dot--missed {
+  background: var(--color-danger);
+}
+
+[data-theme="goldeneye"] .week-dot--fds {
+  background: var(--color-warning);
+}
+
+[data-theme="goldeneye"] .week-dot--rest {
+  background: var(--color-recovery);
+  opacity: 1;
+}
+
+[data-theme="goldeneye"] .week-strip-day--today .week-strip-label {
+  color: var(--color-effort);
+}
+
+[data-theme="goldeneye"] .segment-btn,
+[data-theme="goldeneye"] .toggle-switch {
+  transition: background var(--duration-fast) step-end, border-color var(--duration-fast) step-end;
+}
+
+/* ─── Red Alert ─── */
+[data-theme="red-alert"] {
+  --color-bg: #121416;
+  --color-surface: #1e2228;
+  --color-surface-elevated: #262c34;
+  --color-text: #c8d8e8;
+  --color-text-muted: #7a8a9a;
+  --color-accent: #c41e1e;
+  --color-effort: #e03030;
+  --color-recovery: #4a5568;
+  --color-warning: #e8a020;
+  --color-danger: #c41e1e;
+  --accent-dim: #8a1414;
+  --on-accent: #ffffff;
+  --border: #3a4048;
+  --border-subtle: #2e343c;
+  --bg-hover: #2a3038;
+  --chart-garmin: #6a9ac8;
+  --font-display: 'Arial Narrow', 'Helvetica Neue', sans-serif;
+}
+
+[data-theme="red-alert"] .section-label,
+[data-theme="red-alert"] .settings-group-title,
+[data-theme="red-alert"] .rest-label,
+[data-theme="red-alert"] .flow-complete-label,
+[data-theme="red-alert"] .app-logo {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+[data-theme="red-alert"] .exercise-card,
+[data-theme="red-alert"] .mission-card,
+[data-theme="red-alert"] .heatmap,
+[data-theme="red-alert"] .body-status-card,
+[data-theme="red-alert"] .integrity-tile,
+[data-theme="red-alert"] .segment-btn,
+[data-theme="red-alert"] .overlay-panel {
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="red-alert"] .timed-countdown-ring,
+[data-theme="red-alert"] .rest-ring {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme="red-alert"] .timed-countdown-ring::after,
+  [data-theme="red-alert"] .rest-ring::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 340deg,
+      color-mix(in srgb, var(--color-effort) 35%, transparent) 340deg,
+      transparent 360deg
+    );
+    animation: radarSweep 3s linear infinite;
+    pointer-events: none;
+  }
+}
+
+@keyframes radarSweep {
+  to { transform: rotate(360deg); }
+}
+
+[data-theme="red-alert"] .state-personal-best,
+[data-theme="red-alert"] .workout-history-item--pb {
+  animation: alertFlash 400ms step-end 2;
+}
+
+@keyframes alertFlash {
+  0%, 100% { background: transparent; }
+  50% { background: color-mix(in srgb, var(--color-warning) 18%, transparent); }
+}
+
+/* ─── Shared state treatments ─── */
+.rest-screen {
+  --rest-accent: var(--color-recovery);
+}
+
+.rest-screen .rest-countdown {
+  color: var(--color-effort);
+}
+
+.coach-note {
+  border-left-color: var(--color-recovery);
+}
+
+.settings-empty,
+.heatmap-empty,
+.body-status-empty,
+.health-empty {
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-elevated);
+  text-align: center;
+}
+
+.week-dot--rest {
+  background: var(--color-recovery);
+}
+
+.week-dot--done {
+  background: var(--color-accent);
+}
+
+.flow-complete-screen .flow-complete-text {
+  color: var(--color-recovery);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="vitals"] .progress-fill,
+  [data-theme="red-alert"] .timed-countdown-ring::after,
+  [data-theme="red-alert"] .rest-ring::after,
+  [data-theme="red-alert"] .state-personal-best,
+  [data-theme="red-alert"] .workout-history-item--pb {
+    animation: none !important;
+  }
+
+  .red-alert-boot--out {
+    transition: none;
+  }
+}

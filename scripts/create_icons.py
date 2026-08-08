@@ -1,39 +1,63 @@
-"""Generate minimal PWA icons for Athlete OS."""
-import struct
-import zlib
+"""Generate Formula PWA icons (black background, green italic f-hook).
+
+Requires: pip install pillow
+"""
+from __future__ import annotations
+
 from pathlib import Path
 
-def crc32(data: bytes) -> int:
-    return zlib.crc32(data) & 0xFFFFFFFF
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError as exc:
+    raise SystemExit('Install Pillow first: pip install pillow') from exc
 
-def chunk(chunk_type: bytes, data: bytes) -> bytes:
-    return struct.pack('>I', len(data)) + chunk_type + data + struct.pack('>I', crc32(chunk_type + data))
+ROOT = Path(__file__).resolve().parent.parent
+ICONS = ROOT / 'icons'
 
-def create_png(size: int) -> bytes:
-    width = height = size
-    rows = []
-    for y in range(height):
-        row = bytearray([0])
-        for x in range(width):
-            cx = x - width / 2
-            cy = y - height / 2
-            in_circle = cx * cx + cy * cy < (width * 0.42) ** 2
-            if in_circle:
-                row.extend([196, 146, 58, 255])
-            else:
-                row.extend([26, 28, 30, 255])
-        rows.append(bytes(row))
-    raw = b''.join(rows)
-    compressed = zlib.compress(raw, 9)
-    ihdr = struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)
-    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', compressed) + chunk(b'IEND', b'')
+BG = (0, 0, 0, 255)
+FG = (143, 212, 100, 255)
+GLYPH = '\u0192'
 
-def main():
-    out = Path(__file__).resolve().parent.parent / 'icons'
-    out.mkdir(exist_ok=True)
-    (out / 'icon-192.png').write_bytes(create_png(192))
-    (out / 'icon-512.png').write_bytes(create_png(512))
-    print('Icons created in', out)
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        Path('C:/Windows/Fonts/georgiai.ttf'),
+        Path('C:/Windows/Fonts/timesi.ttf'),
+        Path('/System/Library/Fonts/Supplemental/Georgia Italic.ttf'),
+        Path('/System/Library/Fonts/Times.ttc'),
+        Path('/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf'),
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                return ImageFont.truetype(str(path), size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def render_icon(size: int) -> Image.Image:
+    image = Image.new('RGBA', (size, size), BG)
+    draw = ImageDraw.Draw(image)
+    font_size = max(24, int(size * 0.62))
+    font = _load_font(font_size)
+
+    bbox = draw.textbbox((0, 0), GLYPH, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    x = (size - text_w) / 2 - bbox[0]
+    y = (size - text_h) / 2 - bbox[1]
+    draw.text((x, y), GLYPH, font=font, fill=FG)
+    return image
+
+
+def main() -> None:
+    ICONS.mkdir(exist_ok=True)
+    for size in (192, 512):
+        out = ICONS / f'icon-{size}.png'
+        render_icon(size).save(out, format='PNG')
+        print('Wrote', out)
+
 
 if __name__ == '__main__':
     main()
