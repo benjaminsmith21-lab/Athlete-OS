@@ -511,6 +511,7 @@ input:focus-visible,
   border-bottom: 1px solid var(--border);
   font-size: 14px;
   gap: 12px;
+  font-family: var(--font-display);
 }
 
 .exercise-list li:last-child {
@@ -518,7 +519,7 @@ input:focus-visible,
 }
 
 .exercise-list .rx {
-  font-family: var(--font-data);
+  font-family: var(--font-display);
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -685,10 +686,11 @@ input:focus-visible,
   font-size: 28px;
   font-weight: 600;
   line-height: 1.2;
+  font-family: var(--font-display);
 }
 
 .warmup-rx {
-  font-family: var(--font-data);
+  font-family: var(--font-display);
   font-size: 20px;
   color: var(--accent);
   margin: 0 0 12px;
@@ -702,6 +704,7 @@ input:focus-visible,
   font-size: 15px;
   line-height: 1.5;
   color: var(--text);
+  font-family: var(--font-display);
 }
 
 .warmup-flow-lines li + li {
@@ -713,6 +716,7 @@ input:focus-visible,
   font-size: 13px;
   line-height: 1.4;
   color: var(--text-muted);
+  font-family: var(--font-display);
 }
 
 .warmup-weight-panel {
@@ -756,7 +760,7 @@ input:focus-visible,
 }
 
 .exercise-rx {
-  font-family: var(--font-data);
+  font-family: var(--font-display);
   font-size: 28px;
   color: var(--accent);
   margin-bottom: 8px;
@@ -835,6 +839,7 @@ input:focus-visible,
   flex: 1;
   font-size: 13px;
   color: var(--text-muted);
+  font-family: var(--font-display);
 }
 
 .adjust-row input[type="number"],
@@ -1206,11 +1211,53 @@ input:focus-visible,
   font-size: 22px;
   font-weight: 600;
   margin: 0 0 8px;
+  font-family: var(--font-display);
 }
 
 .complete-sub {
   font-size: 14px;
   color: var(--text-muted);
+}
+
+.complete-highlights {
+  text-align: center;
+  margin: 8px 0 20px;
+  padding: 0 8px;
+}
+
+.complete-stats {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.complete-badges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.complete-badge {
+  margin: 0;
+  padding: 10px 12px 10px 14px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-surface-elevated);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  text-align: left;
+}
+
+.complete-badge--pr {
+  border-left-color: var(--color-effort);
+  color: var(--color-effort);
 }
 
 .hidden {
@@ -1261,7 +1308,7 @@ input:focus-visible,
   min-width: 56px;
   max-width: 56px;
   text-align: center;
-  font-family: var(--font-data);
+  font-family: var(--font-display);
   font-size: 20px;
   font-weight: 600;
   color: var(--accent);
@@ -1793,13 +1840,14 @@ input:focus-visible,
   color: var(--text);
   margin: 0;
   line-height: 1.3;
+  font-family: var(--font-display);
 }
 
 .rest-next-rx {
   font-size: 14px;
   color: var(--text-muted);
   margin: 0;
-  font-family: var(--font-data);
+  font-family: var(--font-display);
 }
 
 .rest-next-title {
@@ -1816,7 +1864,7 @@ input:focus-visible,
   font-size: 14px;
   color: var(--text);
   margin: 0;
-  font-family: var(--font-data);
+  font-family: var(--font-display);
 }
 
 .rest-next-note {
@@ -3313,6 +3361,7 @@ input:focus-visible,
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
+  font-family: var(--font-display);
 }
 
 .overlay--picker {

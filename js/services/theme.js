@@ -42,7 +42,12 @@ export const THEMES = [
   {
     id: 'red-alert',
     name: 'Red Alert',
-    swatch: ['#121416', '#1e2228', '#c41e1e']
+    swatch: ['#1a0808', '#220a0a', '#ffb020']
+  },
+  {
+    id: 'chef',
+    name: 'Chef',
+    swatch: ['#1a0a2e', '#3d1860', '#e84393']
   }
 ];
 

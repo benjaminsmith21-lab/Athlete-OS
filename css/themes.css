@@ -6,6 +6,22 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'Fredoka One';
+  src: url('../fonts/FredokaOne-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Bebas Neue';
+  src: url('../fonts/BebasNeue-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ─── Command Centre (default) ─── */
 [data-theme="command-centre"] {
   --color-bg: #1a1c1e;
@@ -353,6 +369,36 @@
   color: var(--color-text-muted);
 }
 
+[data-theme="goldeneye"] .warmup-title {
+  font-size: 14px;
+}
+
+[data-theme="goldeneye"] .warmup-rx {
+  font-size: 8px;
+}
+
+[data-theme="goldeneye"] .warmup-purpose {
+  font-size: 7px;
+}
+
+[data-theme="goldeneye"] .dial-value {
+  font-size: 10px;
+}
+
+[data-theme="goldeneye"] .exercise-list .rx {
+  font-size: 7px;
+}
+
+[data-theme="goldeneye"] .complete-badge {
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+[data-theme="goldeneye"] .complete-stats {
+  font-size: 7px;
+  line-height: 1.6;
+}
+
 [data-theme="goldeneye"] .exercise-name {
   font-size: 14px;
   line-height: 1.5;
@@ -437,8 +483,8 @@
 
 [data-theme="goldeneye"] .btn-primary {
   font-size: 10px;
-  background: var(--color-effort);
-  color: var(--on-accent);
+  background: #008F11;
+  color: var(--color-accent);
   border: 2px solid var(--color-accent);
   transition: background var(--duration-fast) step-end, border-color var(--duration-fast) step-end, filter var(--duration-fast) step-end;
 }
@@ -446,6 +492,22 @@
 [data-theme="goldeneye"] .btn-primary:active {
   opacity: 1;
   filter: brightness(0.92);
+}
+
+@keyframes goldeneyeCtaPulse {
+  0%, 100% {
+    filter: brightness(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    filter: brightness(1.2);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+}
+
+[data-theme="goldeneye"] #btn-begin:not(:disabled),
+[data-theme="goldeneye"] #btn-start {
+  animation: goldeneyeCtaPulse 1.4s step-end infinite;
 }
 
 [data-theme="goldeneye"] .btn-secondary,
@@ -534,33 +596,138 @@
 
 /* ─── Red Alert ─── */
 [data-theme="red-alert"] {
-  --color-bg: #121416;
-  --color-surface: #1e2228;
-  --color-surface-elevated: #262c34;
-  --color-text: #c8d8e8;
-  --color-text-muted: #7a8a9a;
+  --color-bg: #1a0808;
+  --color-surface: #140606;
+  --color-surface-elevated: #220a0a;
+  --color-text: #f0c040;
+  --color-text-muted: #b88830;
   --color-accent: #c41e1e;
-  --color-effort: #e03030;
-  --color-recovery: #4a5568;
-  --color-warning: #e8a020;
-  --color-danger: #c41e1e;
+  --color-effort: #ffb020;
+  --color-recovery: #5a2020;
+  --color-warning: #ffb020;
+  --color-danger: #e03030;
   --accent-dim: #8a1414;
-  --on-accent: #ffffff;
-  --border: #3a4048;
-  --border-subtle: #2e343c;
-  --bg-hover: #2a3038;
+  --on-accent: #1a0808;
+  --border: #8a2020;
+  --border-subtle: #4a1010;
+  --bg-hover: #2a0c0c;
   --chart-garmin: #6a9ac8;
-  --font-display: 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --ra-gold: #f0c040;
+  --ra-glow: color-mix(in srgb, #ffb020 55%, transparent);
+  --font-display: 'Bebas Neue', Impact, 'Arial Black', sans-serif;
+}
+
+html[data-theme="red-alert"] {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 23px,
+      rgba(0, 0, 0, 0.15) 23px,
+      rgba(0, 0, 0, 0.15) 24px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 23px,
+      rgba(0, 0, 0, 0.15) 23px,
+      rgba(0, 0, 0, 0.15) 24px
+    ),
+    repeating-conic-gradient(
+      from 270deg at 50% 120%,
+      rgba(196, 30, 30, 0.35) 0deg 8deg,
+      transparent 8deg 16deg
+    ),
+    radial-gradient(ellipse 120% 80% at 50% 100%, #4a1010 0%, #1a0808 55%);
+}
+
+html[data-theme="red-alert"] body {
+  background: transparent;
+}
+
+[data-theme="red-alert"] .app-header {
+  background: #0a0404;
+  border-bottom: 4px solid transparent;
+  border-image: repeating-linear-gradient(45deg, #000 0 6px, #c41e1e 6px 12px) 4;
+}
+
+[data-theme="red-alert"] .header-context {
+  color: var(--ra-gold);
+  text-shadow: 0 0 8px var(--ra-glow);
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
 }
 
 [data-theme="red-alert"] .section-label,
 [data-theme="red-alert"] .settings-group-title,
 [data-theme="red-alert"] .rest-label,
 [data-theme="red-alert"] .flow-complete-label,
-[data-theme="red-alert"] .app-logo {
+[data-theme="red-alert"] .settings-accordion-label {
+  font-family: var(--font-display);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-weight: 400;
+  color: var(--ra-gold);
+  text-shadow: 0 0 8px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .section-label,
+[data-theme="red-alert"] .settings-group-title {
+  font-size: 11px;
+}
+
+[data-theme="red-alert"] .campaign-title,
+[data-theme="red-alert"] .exercise-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--ra-gold);
+  text-shadow: 0 0 10px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .complete-title,
+[data-theme="red-alert"] .complete-badge,
+[data-theme="red-alert"] .complete-stats {
+  font-family: var(--font-display);
+  color: var(--ra-gold);
+}
+
+[data-theme="red-alert"] .complete-badge--pr {
+  border-left-color: var(--color-accent);
+  box-shadow:
+    inset 0 0 0 1px var(--ra-gold),
+    0 0 12px var(--ra-glow);
+  color: var(--color-effort);
+}
+
+[data-theme="red-alert"] .complete-badge--pr::before {
+  content: '★ ';
+  color: var(--color-accent);
+}
+
+[data-theme="red-alert"] .mission-brief-kicker {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: var(--color-accent);
+  color: var(--ra-gold);
+  margin: -16px -16px 12px;
+  padding: 10px 16px;
+  border-radius: 0;
+  text-shadow: 0 0 8px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .mission-brief-label,
+[data-theme="red-alert"] .mission-brief-operation,
+[data-theme="red-alert"] .week-strip-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+}
+
+[data-theme="red-alert"] .week-strip-day--today .week-strip-label {
+  color: var(--ra-gold);
+  text-shadow: 0 0 8px var(--ra-glow);
 }
 
 [data-theme="red-alert"] .exercise-card,
@@ -568,11 +735,122 @@
 [data-theme="red-alert"] .heatmap,
 [data-theme="red-alert"] .body-status-card,
 [data-theme="red-alert"] .integrity-tile,
-[data-theme="red-alert"] .segment-btn,
+[data-theme="red-alert"] .week-strip,
 [data-theme="red-alert"] .overlay-panel {
+  border: 2px solid var(--color-accent);
+  background: linear-gradient(180deg, #220a0a 0%, #140606 100%);
   box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px var(--ra-gold),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.06),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.5),
+    0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+[data-theme="red-alert"] .segment-btn {
+  border: 1px solid var(--color-accent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ra-gold) 40%, transparent),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.06),
     inset -1px -1px 0 rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="red-alert"] .segment-btn.selected {
+  color: var(--ra-gold);
+  background: color-mix(in srgb, var(--color-accent) 35%, #0a0404);
+  box-shadow:
+    inset 0 0 0 1px var(--ra-gold),
+    0 0 10px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .theme-swatch-btn.selected {
+  box-shadow: 0 0 10px var(--ra-glow);
+  border-color: var(--color-effort);
+}
+
+[data-theme="red-alert"] .btn-primary,
+[data-theme="red-alert"] .btn-secondary,
+[data-theme="red-alert"] .btn-abort,
+[data-theme="red-alert"] .btn-abort-inline,
+[data-theme="red-alert"] .btn-fds,
+[data-theme="red-alert"] .btn-fds-inline,
+[data-theme="red-alert"] .btn-danger {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 400;
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+}
+
+[data-theme="red-alert"] .btn-primary {
+  font-size: 15px;
+  background: #0a0404;
+  color: var(--ra-gold);
+  border: 2px solid var(--color-accent);
+  text-shadow: 0 0 8px var(--ra-glow);
+  box-shadow: inset 0 0 0 1px var(--ra-gold);
+}
+
+[data-theme="red-alert"] .btn-primary:active {
+  opacity: 1;
+  filter: brightness(1.15);
+}
+
+[data-theme="red-alert"] .btn-secondary {
+  font-size: 13px;
+  background: color-mix(in srgb, #140606 85%, transparent);
+  color: var(--ra-gold);
+  border: 2px solid var(--color-accent);
+  text-shadow: 0 0 6px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .btn-abort,
+[data-theme="red-alert"] .btn-abort-inline {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+[data-theme="red-alert"] .btn-danger {
+  background: var(--color-danger);
+  color: var(--ra-gold);
+  border: 2px solid color-mix(in srgb, var(--color-danger) 70%, #000);
+}
+
+[data-theme="red-alert"] .red-alert-boot {
+  background:
+    repeating-conic-gradient(
+      from 270deg at 50% 120%,
+      rgba(196, 30, 30, 0.35) 0deg 8deg,
+      transparent 8deg 16deg
+    ),
+    radial-gradient(ellipse 120% 80% at 50% 100%, #4a1010 0%, #000 55%);
+}
+
+[data-theme="red-alert"] .red-alert-boot-panel {
+  border: 2px solid var(--color-accent);
+  box-shadow:
+    inset 0 0 0 1px var(--ra-gold),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.45),
+    0 0 20px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background: linear-gradient(180deg, #220a0a 0%, #0a0404 100%);
+}
+
+[data-theme="red-alert"] .red-alert-boot-panel::before {
+  content: '★';
+  display: block;
+  margin-bottom: 8px;
+  font-size: 24px;
+  color: var(--color-accent);
+  text-shadow: 0 0 12px var(--ra-glow);
+}
+
+[data-theme="red-alert"] .red-alert-boot-text {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--ra-gold);
+  text-shadow: 0 0 10px var(--ra-glow);
 }
 
 [data-theme="red-alert"] .timed-countdown-ring,
@@ -600,18 +878,219 @@
   }
 }
 
-@keyframes radarSweep {
-  to { transform: rotate(360deg); }
-}
-
 [data-theme="red-alert"] .state-personal-best,
 [data-theme="red-alert"] .workout-history-item--pb {
   animation: alertFlash 400ms step-end 2;
 }
 
+@keyframes radarSweep {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes alertFlash {
   0%, 100% { background: transparent; }
   50% { background: color-mix(in srgb, var(--color-warning) 18%, transparent); }
+}
+
+/* ─── Chef ─── */
+[data-theme="chef"] {
+  --color-bg: #1a0a2e;
+  --color-surface: #3d1860;
+  --color-surface-elevated: #4a2075;
+  --color-text: #ffffff;
+  --color-text-muted: #c4b5d8;
+  --color-accent: #e84393;
+  --color-effort: #ffd93d;
+  --color-recovery: #5eead4;
+  --color-warning: #fb923c;
+  --color-danger: #ef4444;
+  --accent-dim: #b83280;
+  --on-accent: #1a0a2e;
+  --border: rgba(255, 255, 255, 0.35);
+  --border-subtle: rgba(255, 255, 255, 0.15);
+  --bg-hover: #552888;
+  --chart-garmin: #5eead4;
+  --font-display: 'Fredoka One', 'Arial Rounded MT Bold', sans-serif;
+  --radius-md: 20px;
+  --radius-lg: 24px;
+  --radius-xl: 28px;
+  --radius-dot: 50%;
+}
+
+html[data-theme="chef"] {
+  background:
+    radial-gradient(ellipse 80% 50% at 15% 0%, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 70%),
+    radial-gradient(ellipse 60% 45% at 95% 100%, color-mix(in srgb, var(--color-recovery) 18%, transparent), transparent 70%),
+    var(--color-bg);
+}
+
+html[data-theme="chef"] body {
+  background: transparent;
+}
+
+[data-theme="chef"] .app-header {
+  background: #0a0a0a;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+[data-theme="chef"] .app-logo {
+  color: #ffffff;
+}
+
+[data-theme="chef"] .section-label,
+[data-theme="chef"] .settings-group-title,
+[data-theme="chef"] .rest-label,
+[data-theme="chef"] .flow-complete-label {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-accent);
+}
+
+[data-theme="chef"] .campaign-title,
+[data-theme="chef"] .exercise-name {
+  font-family: var(--font-display);
+  color: #ffffff;
+}
+
+[data-theme="chef"] .mission-brief-kicker {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-accent);
+  color: #ffffff;
+  margin: -16px -16px 12px;
+  padding: 10px 16px;
+  border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0;
+}
+
+[data-theme="chef"] .mission-brief-label,
+[data-theme="chef"] .mission-brief-operation {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+[data-theme="chef"] .mission-brief-label {
+  color: var(--color-accent);
+}
+
+[data-theme="chef"] .exercise-card,
+[data-theme="chef"] .mission-card,
+[data-theme="chef"] .heatmap,
+[data-theme="chef"] .body-status-card,
+[data-theme="chef"] .integrity-tile,
+[data-theme="chef"] .week-strip {
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--radius-lg);
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(var(--color-surface), var(--color-surface));
+  background-size: 8px 8px, auto;
+}
+
+[data-theme="chef"] .week-strip {
+  background-color: var(--color-surface-elevated);
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(var(--color-surface-elevated), var(--color-surface-elevated));
+}
+
+[data-theme="chef"] .btn-primary,
+[data-theme="chef"] .btn-secondary,
+[data-theme="chef"] .btn-abort,
+[data-theme="chef"] .btn-abort-inline,
+[data-theme="chef"] .btn-fds,
+[data-theme="chef"] .btn-fds-inline,
+[data-theme="chef"] .btn-danger {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+}
+
+[data-theme="chef"] .btn-primary {
+  background: #6ee7a8;
+  color: var(--on-accent);
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  font-weight: 400;
+}
+
+[data-theme="chef"] .btn-primary:active {
+  opacity: 1;
+  filter: brightness(0.92);
+}
+
+[data-theme="chef"] .btn-secondary {
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  border: 2px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+[data-theme="chef"] .btn-abort,
+[data-theme="chef"] .btn-abort-inline {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+[data-theme="chef"] .btn-fds,
+[data-theme="chef"] .btn-fds-inline {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+[data-theme="chef"] .btn-danger {
+  background: var(--color-danger);
+  color: #ffffff;
+  border: 2px solid color-mix(in srgb, var(--color-danger) 70%, #000);
+}
+
+[data-theme="chef"] .week-strip-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+[data-theme="chef"] .week-strip-day--today .week-strip-label {
+  color: var(--color-effort);
+}
+
+[data-theme="chef"] .week-dot {
+  border-radius: var(--radius-dot);
+}
+
+[data-theme="chef"] .week-dot--done {
+  background: var(--color-effort);
+}
+
+[data-theme="chef"] .week-dot--missed {
+  background: var(--color-danger);
+}
+
+[data-theme="chef"] .week-dot--fds {
+  background: var(--color-warning);
+}
+
+[data-theme="chef"] .week-dot--rest {
+  background: var(--color-recovery);
+  opacity: 1;
+}
+
+[data-theme="chef"] .rest-countdown {
+  color: var(--color-recovery);
+}
+
+[data-theme="chef"] .rest-ring {
+  border-top-color: var(--color-recovery);
+}
+
+[data-theme="chef"] .rest-progress-fill {
+  background: var(--color-recovery);
+}
+
+[data-theme="chef"] .progress-fill {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-effort));
 }
 
 /* ─── Shared state treatments ─── */
@@ -655,7 +1134,9 @@
   [data-theme="red-alert"] .timed-countdown-ring::after,
   [data-theme="red-alert"] .rest-ring::after,
   [data-theme="red-alert"] .state-personal-best,
-  [data-theme="red-alert"] .workout-history-item--pb {
+  [data-theme="red-alert"] .workout-history-item--pb,
+  [data-theme="goldeneye"] #btn-begin,
+  [data-theme="goldeneye"] #btn-start {
     animation: none !important;
   }
 

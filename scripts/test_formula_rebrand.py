@@ -31,7 +31,7 @@ def test_icon_assets():
 def test_sw_includes_formula_icons():
     sw = (ROOT / 'sw.js').read_text(encoding='utf-8')
     assert './icons/icon.svg' in sw
-    assert 'athlete-os-v64' in sw
+    assert 'athlete-os-v68' in sw
 
 
 def test_user_facing_copy():

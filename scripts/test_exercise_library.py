@@ -174,7 +174,7 @@ def test_progression_uses_library_map():
 
 def test_sw_version():
     sw = (ROOT / 'sw.js').read_text(encoding='utf-8')
-    assert 'athlete-os-v64' in sw
+    assert 'athlete-os-v68' in sw
     assert 'exerciseSearch.js' in sw
     assert 'exerciseSchema.js' in sw
 

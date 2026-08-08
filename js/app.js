@@ -154,6 +154,7 @@ import { initCampaignBuilderUI, renderCampaignBuilder } from './ui/campaignBuild
 import { initExercisePicker } from './ui/exercisePicker.js';
 import { renderGarminChartSvg, getGarminChartDateRange } from './services/garminChart.js';
 import { getProgressionHints, formatExerciseHistoryRows } from './services/progressionCoach.js';
+import { buildCompletionHighlights } from './services/workoutSummary.js';
 import { getAll } from './db.js';
 import { getLocalDateString, formatDisplayDate, formatMissionDayHeading } from './utils/datetime.js';
 
@@ -4017,9 +4018,21 @@ async function renderComplete(alreadyDone = false) {
     await markBackupDirty();
   }
 
-  const weekly = await getCompletedMissionsThisWeek();
+  const [weekly, allSetLogs, allMissions] = await Promise.all([
+    getCompletedMissionsThisWeek(),
+    getAll('setLogs'),
+    getAll('missions')
+  ]);
   const stats = await getWeeklyStats(weekly);
   const integrity = await getIntegrity();
+  const unit = state.settings?.weightUnit || 'kg';
+  const highlights = buildCompletionHighlights({
+    mission: state.mission,
+    setLogs: state.setLogs,
+    allSetLogs,
+    allMissions,
+    unit
+  });
   const note = await CoachService.getPostMissionNote(state.mission, {
     setLogs: state.setLogs,
     weeklyCount: stats.weeklyCount,
@@ -4034,6 +4047,7 @@ async function renderComplete(alreadyDone = false) {
           <p class="complete-sub">${escapeHtml(state.blueprint.dayName)} · ${escapeHtml(state.blueprint.operation)}${formatWorkoutDuration()}</p>
           <p class="complete-rated">Rated: ${escapeHtml(ratingLabel(state.mission.rating))}</p>
         </div>
+        ${renderCompleteHighlightsHtml(highlights)}
         <div class="coach-note">${escapeHtml(note)}</div>
         <div class="integrity-bar">
           <strong>This week</strong><br>
@@ -4055,6 +4069,44 @@ function formatWorkoutDuration() {
   const end = state.mission.completedAt ? new Date(state.mission.completedAt) : new Date();
   const seconds = Math.round((end - new Date(state.mission.startedAt)) / 1000);
   return seconds > 0 ? ` · ${formatElapsed(seconds)}` : '';
+}
+
+function renderCompleteHighlightsHtml(highlights) {
+  if (!highlights?.showHighlights) return '';
+
+  const parts = [];
+  if (highlights.stats?.exerciseCount > 0) {
+    parts.push(t('completeExerciseCount', { count: highlights.stats.exerciseCount }));
+  }
+  if (highlights.stats?.tonnage?.display) {
+    parts.push(highlights.stats.tonnage.display);
+  }
+
+  const statsHtml = parts.length
+    ? `<p class="complete-stats">${escapeHtml(parts.join(' · '))}</p>`
+    : '';
+
+  const badgesHtml = highlights.badges
+    .map((badge) => {
+      let label;
+      if (badge.type === 'fastest') {
+        label = t('completeFastestSession', {
+          operation: badge.operation,
+          duration: formatElapsed(badge.durationSeconds)
+        });
+      } else {
+        label = `${t('completeNewBest')} · ${badge.exerciseName} · ${badge.detail}`;
+      }
+      return `<li class="complete-badge complete-badge--pr">${escapeHtml(label)}</li>`;
+    })
+    .join('');
+
+  return `
+    <div class="complete-highlights">
+      ${statsHtml}
+      ${badgesHtml ? `<ul class="complete-badges">${badgesHtml}</ul>` : ''}
+    </div>
+  `;
 }
 
 function ratingLabel(rating) {

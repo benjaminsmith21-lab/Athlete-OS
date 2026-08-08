@@ -14,6 +14,7 @@ def test_theme_service_exports():
     assert "export const THEMES" in text
     assert "'goldeneye'" in text
     assert "'red-alert'" in text
+    assert "'chef'" in text
     assert 'RED_ALERT_BOOT_PENDING_KEY' in text
 
 
@@ -48,6 +49,27 @@ def test_goldeneye_button_typography():
     assert '[data-theme="goldeneye"] .week-strip-label' in css
 
 
+def test_goldeneye_primary_button_color_and_cta_pulse():
+    css = (ROOT / 'css/themes.css').read_text(encoding='utf-8')
+    assert '[data-theme="goldeneye"] .btn-primary {\n  font-size: 10px;\n  background: #008F11;' in css
+    assert '@keyframes goldeneyeCtaPulse' in css
+    assert '[data-theme="goldeneye"] #btn-begin:not(:disabled)' in css
+    assert '[data-theme="goldeneye"] #btn-start' in css
+
+
+def test_chef_theme_tokens_and_overrides():
+    css = (ROOT / 'css/themes.css').read_text(encoding='utf-8')
+    block_start = css.index('[data-theme="chef"]')
+    block = css[block_start:block_start + 700]
+    assert '--color-bg: #1a0a2e' in block
+    assert '--color-accent: #e84393' in block
+    assert "--font-display: 'Fredoka One'" in block
+    assert '[data-theme="chef"] .btn-primary' in css
+    assert '[data-theme="chef"] .mission-brief-kicker' in css
+    assert '[data-theme="chef"] .week-strip' in css
+    assert "@font-face {\n  font-family: 'Fredoka One'" in css
+
+
 def test_pre_paint_theme_script():
     html = (ROOT / 'index.html').read_text(encoding='utf-8')
     assert "athlete-os-theme" in html
@@ -62,6 +84,22 @@ def test_theme_picker_in_settings():
     assert 'setAppTheme' in app
 
 
+def test_red_alert_ra3_overhaul():
+    css = (ROOT / 'css/themes.css').read_text(encoding='utf-8')
+    block_start = css.index('[data-theme="red-alert"]')
+    block = css[block_start:block_start + 900]
+    assert '--color-bg: #1a0808' in block
+    assert '--color-text: #f0c040' in block
+    assert "--font-display: 'Bebas Neue'" in block
+    assert '--ra-gold: #f0c040' in block
+    assert "html[data-theme=\"red-alert\"]" in css
+    assert 'repeating-conic-gradient' in css
+    assert '[data-theme="red-alert"] .btn-primary' in css
+    assert 'clip-path: polygon(10px 0, 100% 0' in css
+    assert '[data-theme="red-alert"] .red-alert-boot' in css
+    assert "@font-face {\n  font-family: 'Bebas Neue'" in css
+
+
 def test_red_alert_boot_capped():
     theme = (ROOT / 'js/services/theme.js').read_text(encoding='utf-8')
     assert '600' in theme
@@ -73,7 +111,9 @@ def test_sw_includes_theme_assets():
     assert './css/themes.css' in sw
     assert './js/services/theme.js' in sw
     assert './fonts/PressStart2P-Regular.woff2' in sw
-    assert 'athlete-os-v64' in sw
+    assert './fonts/FredokaOne-Regular.woff2' in sw
+    assert './fonts/BebasNeue-Regular.woff2' in sw
+    assert 'athlete-os-v68' in sw
 
 
 if __name__ == '__main__':
@@ -82,6 +122,9 @@ if __name__ == '__main__':
     test_goldeneye_font_split()
     test_goldeneye_text_accent_effort_split()
     test_goldeneye_button_typography()
+    test_goldeneye_primary_button_color_and_cta_pulse()
+    test_chef_theme_tokens_and_overrides()
+    test_red_alert_ra3_overhaul()
     test_pre_paint_theme_script()
     test_theme_picker_in_settings()
     test_red_alert_boot_capped()

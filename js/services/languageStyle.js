@@ -186,7 +186,16 @@ export const COPY = {
     standard: 'A short warm-up helps. Skip if you are flat or short on time.'
   },
   fdsWarmupYes: { tactical: 'Warm up', standard: 'Warm up' },
-  fdsWarmupSkip: { tactical: 'Skip to workout', standard: 'Skip to workout' }
+  fdsWarmupSkip: { tactical: 'Skip to workout', standard: 'Skip to workout' },
+  completeNewBest: { tactical: 'New best', standard: 'New best' },
+  completeFastestSession: {
+    tactical: 'Fastest {operation} session · {duration}',
+    standard: 'Fastest {operation} session · {duration}'
+  },
+  completeExerciseCount: {
+    tactical: '{count} objectives',
+    standard: '{count} exercises'
+  }
 };
 
 const RATING_COPY_KEYS = {

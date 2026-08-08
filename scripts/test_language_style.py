@@ -68,5 +68,5 @@ def test_form_cues_and_settings_return():
 
 def test_sw_includes_language_style():
     sw = (ROOT / 'sw.js').read_text(encoding='utf-8')
-    assert 'athlete-os-v64' in sw
+    assert 'athlete-os-v68' in sw
     assert './js/services/languageStyle.js' in sw

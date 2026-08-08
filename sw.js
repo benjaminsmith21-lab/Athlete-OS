@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athlete-os-v64';
+const CACHE_NAME = 'athlete-os-v68';
 
 const ASSETS = [
   './',
@@ -7,6 +7,8 @@ const ASSETS = [
   './css/app.css',
   './css/themes.css',
   './fonts/PressStart2P-Regular.woff2',
+  './fonts/FredokaOne-Regular.woff2',
+  './fonts/BebasNeue-Regular.woff2',
   './js/app.js',
   './js/db.js',
   './js/utils/datetime.js',
@@ -61,6 +63,7 @@ const ASSETS = [
   './js/ui/exercisePicker.js',
   './js/services/garminChart.js',
   './js/services/progressionCoach.js',
+  './js/services/workoutSummary.js',
   './js/services/backupSnapshot.js',
   './js/services/backupScheduler.js',
   './assets/audio/rest-complete.wav',
